@@ -4,3 +4,4 @@ sqlalchemy>=2.0,<3
 psycopg[binary]>=3.2,<4
 httpx>=0.28,<1
 pytest>=8,<10
+cryptography>=46,<48

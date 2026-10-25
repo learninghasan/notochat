@@ -110,6 +110,7 @@ class KnowledgeInput(BaseModel):
 
 
 class AgentInput(BaseModel):
+    auto_draft: bool = False
     language: Literal["Bangla", "English", "Auto"] = "Auto"
     tone: Literal["Friendly", "Professional", "Concise"] = "Friendly"
     instructions: str = Field(default="", max_length=10000)
@@ -172,12 +173,16 @@ class AssistantInput(BaseModel):
     question: str = Field(default="", max_length=2000)
 
 
-def install(app, engine, Base, Conversation, Message, Product, authorize, session):
-    class Record(Base):
-        __tablename__ = "workspace_records"
-        id: Mapped[str] = mapped_column(String(160), primary_key=True)
-        kind: Mapped[str] = mapped_column(String(40), index=True)
-        data: Mapped[dict] = mapped_column(JSON)
+def install(app, engine, Base, Conversation, Message, Product, authorize, session, tenant=False):
+    if hasattr(Base,"WorkspaceRecord"):
+        Record=Base.WorkspaceRecord
+    else:
+        class Record(Base):
+            __tablename__ = "workspace_records"
+            id: Mapped[str] = mapped_column(String(160), primary_key=True)
+            kind: Mapped[str] = mapped_column(String(40), index=True)
+            data: Mapped[dict] = mapped_column(JSON)
+        Base.WorkspaceRecord=Record
 
     Base.metadata.create_all(engine)
     from sqlalchemy.orm import Session
@@ -241,11 +246,14 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
             put(s, "team", {"name": "Workspace owner", "email": "owner@example.com", "role": "Owner", "channels": [], "access": "profile-only; per-user authentication not configured"}, "team:owner")
         s.commit()
 
+    from connections import install_connections
+    channel_configuration=install_connections(app,engine,Record,authorize,session,tenant)
+
     from channels import install_channels
-    install_channels(app,engine,Record,Conversation,Message,authorize,session)
+    install_channels(app,engine,Record,Conversation,Message,authorize,session,configuration=channel_configuration)
 
     from widget import install_widget
-    install_widget(app,engine,Record,Conversation,Message,session)
+    install_widget(app,engine,Record,Conversation,Message,session,configuration=channel_configuration)
 
     def clear_handover(s,cid):
         r=s.get(Record,f"conversation:{cid}")
@@ -258,7 +266,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     @app.get("/workspace", dependencies=protected)
     def workspace(s: Session = Depends(session)):
         expire(s)
-        return {"leads": records(s,"leads"), "orders": records(s,"orders"), "bookings": records(s,"bookings"), "knowledge": records(s,"knowledge"), "notifications": records(s,"notifications"), "automations": records(s,"automations"), "team": records(s,"team"), "broadcasts": records(s,"broadcasts"), "agent": get(s,"agent:live").data, "agent_versions": records(s,"agent_versions"), "deliveries":records(s,"delivery"), "conversation_meta": {str(c.id):meta(s,c.id) for c in s.scalars(select(Conversation))}}
+        return {"leads": records(s,"leads"), "orders": records(s,"orders"), "bookings": records(s,"bookings"), "knowledge": records(s,"knowledge"), "notifications": records(s,"notifications"), "automations": records(s,"automations"), "team": records(s,"team"), "broadcasts": records(s,"broadcasts"), "agent": get(s,"agent:live").data, "agent_versions": records(s,"agent_versions"), "deliveries":records(s,"delivery"), "assistant_drafts":records(s,"assistant_drafts"), "jobs":records(s,"jobs"), "conversation_meta": {str(c.id):meta(s,c.id) for c in s.scalars(select(Conversation))}}
 
     @app.post("/products", dependencies=protected)
     def create_product(body: ProductInput, s: Session = Depends(session)):
@@ -469,7 +477,8 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     def test_incoming(cid:int,body:IncomingInput,s:Session=Depends(session)):
         conv(s,cid)
         if not body.text.strip():raise HTTPException(422,"Message cannot be blank")
-        s.add(Message(conversation_id=cid,role="customer",text=body.text.strip()))
+        message=Message(conversation_id=cid,role="customer",text=body.text.strip());s.add(message);s.flush()
+        app.state.queue_auto_draft(s,cid,message.id)
         d=meta(s,cid);d["last_inbound"]=stamp()
         put(s,"conversation",d,f"conversation:{cid}");s.commit()
         return {"saved":True,"source":"authenticated local test, not a live webhook"}
@@ -511,15 +520,16 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
 
     @app.get("/integrations", dependencies=protected)
     def integrations(s:Session=Depends(session)):
+        settings=channel_configuration()
         ai=bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
-        meta_base=all(os.getenv(k) for k in ["META_APP_SECRET","META_VERIFY_TOKEN","META_GRAPH_VERSION"])
-        configured={"Messenger":bool(meta_base and os.getenv("META_PAGE_ID") and os.getenv("META_PAGE_ACCESS_TOKEN")),"Instagram":bool(meta_base and os.getenv("META_PAGE_ID") and os.getenv("META_PAGE_ACCESS_TOKEN")),"WhatsApp":bool(meta_base and os.getenv("WHATSAPP_PHONE_NUMBER_ID") and os.getenv("WHATSAPP_ACCESS_TOKEN"))}
+        meta_base=all(settings.get(k) for k in ["META_APP_SECRET","META_VERIFY_TOKEN","META_GRAPH_VERSION"])
+        configured={"Messenger":bool(meta_base and settings.get("META_PAGE_ID") and settings.get("META_PAGE_ACCESS_TOKEN")),"Instagram":bool(meta_base and settings.get("INSTAGRAM_ACCOUNT_ID") and (settings.get("INSTAGRAM_ACCESS_TOKEN") or settings.get("META_PAGE_ACCESS_TOKEN"))),"WhatsApp":bool(meta_base and settings.get("WHATSAPP_PHONE_NUMBER_ID") and settings.get("WHATSAPP_ACCESS_TOKEN"))}
         received={d.get("channel") for d in records(s,"channel")}
-        result=[{"name":"Website widget","configured":os.getenv("WIDGET_ENABLED")=="1","ready":os.getenv("WIDGET_ENABLED")=="1","detail":"Session-authenticated iframe chat at /widget; set WIDGET_ENABLED=1 and WIDGET_FRAME_ANCESTORS to your allowed site origins"},{"name":"OpenAI","configured":ai,"ready":ai,"detail":"Provider credentials present; an actual request verifies access" if ai else "Set OPENAI_API_KEY and OPENAI_MODEL on the backend"}]
+        result=[{"name":"Website widget","configured":settings.get("WIDGET_ENABLED")=="1","ready":settings.get("WIDGET_ENABLED")=="1","detail":"Session-authenticated iframe chat at /widget; set WIDGET_ENABLED=1 and WIDGET_FRAME_ANCESTORS to your allowed site origins"},{"name":"OpenAI","configured":ai,"ready":ai,"detail":"Provider credentials present; an actual request verifies access" if ai else "Set OPENAI_API_KEY and OPENAI_MODEL on the backend"}]
         for channel in ("Messenger","Instagram","WhatsApp"):
-            ready=bool(configured[channel] and channel in received and os.getenv("ENABLE_LIVE_SEND")=="1")
+            ready=bool(configured[channel] and channel in received and settings.get("ENABLE_LIVE_SEND")=="1")
             result.append({"name":channel,"configured":configured[channel],"ready":ready,"detail":"Official webhook and text delivery adapter implemented. Requires channel credentials, signed inbound verification and ENABLE_LIVE_SEND=1. Provider permissions need live end-to-end testing."})
-        result.extend([{"name":"Facebook comments","configured":bool(meta_base and os.getenv("META_PAGE_ID")),"ready":False,"detail":"Signed comment ingestion implemented. Comment replies and private replies are not implemented."},{"name":"Steadfast","configured":False,"ready":False,"detail":"Courier API credentials and booking/status adapter not connected"},{"name":"Pathao","configured":False,"ready":False,"detail":"Merchant account and courier adapter not connected"},{"name":"bKash / Nagad","configured":False,"ready":False,"detail":"No payment collection or payment verification is enabled"}])
+        result.extend([{"name":"Facebook comments","configured":bool(meta_base and settings.get("META_PAGE_ID")),"ready":False,"detail":"Signed comment ingestion implemented. Comment replies and private replies are not implemented."},{"name":"Steadfast","configured":False,"ready":False,"detail":"Courier API credentials and booking/status adapter not connected"},{"name":"Pathao","configured":False,"ready":False,"detail":"Merchant account and courier adapter not connected"},{"name":"bKash / Nagad","configured":False,"ready":False,"detail":"No payment collection or payment verification is enabled"}])
         return result
 
     @app.get("/billing", dependencies=protected)
@@ -544,3 +554,6 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         if not text:raise HTTPException(502,"AI returned no text")
         put(s,"usage",{"created_at":stamp(),"model":model,"action":body.action,"conversation_id":cid,"tokens":result.get("usage",{}),"cost_bdt":None});s.commit()
         return {"text":text,"requires_review":True}
+
+    from jobs import install_jobs
+    install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,notify,expire,within_window,assistant,AssistantInput)

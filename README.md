@@ -1,6 +1,10 @@
 # NotoChat
 
-**সব চ্যাট, এক জায়গায়।** A commerce workspace built with Next.js (JavaScript), FastAPI (Python), SQLAlchemy and PostgreSQL. SQLite fallback supports local evaluation. This increment implements one shared business workspace; it is not a production multi-tenant SaaS.
+**সব চ্যাট, এক জায়গায়।** A commerce workspace built with Next.js (JavaScript), FastAPI (Python), SQLAlchemy and PostgreSQL. SQLite fallback supports local evaluation. Account mode adds Better Auth business organizations and isolated operational workspaces; the legacy token workspace remains separate. Production operations and several integrations are still unfinished.
+
+## New: accounts and background preparation
+
+Business signup/login, verified invitations, membership removal, owner/member permissions, isolated business storage, encrypted per-business channel settings and durable background draft jobs are implemented. See [account and worker setup](docs/ACCOUNTS_AND_JOBS.md) before deployment. Use `uvicorn server:app` for account-backed requests.
 
 ## What you can use
 
@@ -11,7 +15,7 @@
 - Booking requests, overlap checks, confirmation/cancellation/completion and reminder drafts.
 - Knowledge documents with text/Markdown import and keyword search.
 - Agent rules with explicit draft, publish and restore workflows.
-- Follow-up scheduling drafts and broadcast audience previews; neither pretends to send.
+- Follow-up scheduling, durable background reminder/AI draft preparation and broadcast audience previews; no automatic send.
 - Record-based analytics, team profiles and genuine provider token-usage records.
 - Backend AI copilot, image analysis and voice transcription when models are configured.
 - Signed Meta webhook ingestion, explicit official text delivery (off by default), and isolated website-chat sessions.
@@ -53,7 +57,7 @@ API documentation: http://127.0.0.1:8000/docs.
 
 Import `learninghasan/notochat` into Vercel and set **Root Directory = frontend**, framework **Next.js**. Without a backend, the deployment provides the interactive browser-local demo. Data stays in that browser and is not shared between devices.
 
-To use server persistence, deploy FastAPI to an ASGI host with a durable PostgreSQL DATABASE_URL and APP_TOKEN, then set BACKEND_URL on the Vercel frontend and redeploy. Vercel's Next.js rewrites proxy `/api/*` to the backend before the friendly fallback route. Do not point BACKEND_URL at localhost in a hosted deployment.
+To use server persistence, deploy FastAPI to an ASGI host with a durable PostgreSQL DATABASE_URL and APP_TOKEN, then set BACKEND_URL on the Vercel frontend and redeploy. The native Next.js `/api/*` route proxies workspace requests after verifying account membership; `/api/auth/*` is handled by Better Auth. Do not point BACKEND_URL at localhost in a hosted deployment.
 
 ## AI setup
 
@@ -97,4 +101,4 @@ Tests cover stock atomicity/idempotency, order transitions, booking overlap/remi
 
 ## Deployment limits
 
-External courier/payment integrations, account-based tenant isolation, durable scheduling, push notifications, automatic AI sales workflows and production operations remain unfinished. Team entries are profiles, not authenticated members; advance amounts are unverified; reminder/broadcast entries are drafts. Database schema creation is additive via SQLAlchemy create_all; managed migration/rollback and backup procedures are still required. Review [FEATURES.md](docs/FEATURES.md) before onboarding real businesses.
+External courier/payment integrations, per-channel access control, push notifications, autonomous AI sales workflows and production operations remain unfinished. Directory entries are profiles; real account members/invitations are managed separately with Better Auth; advance amounts are unverified; reminder/broadcast entries are drafts. Database schema creation is additive via SQLAlchemy create_all; managed migration/rollback and backup procedures are still required. Review [FEATURES.md](docs/FEATURES.md) before onboarding real businesses.

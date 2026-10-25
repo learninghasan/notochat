@@ -19,7 +19,8 @@ class DeliveryInput(BaseModel):
     message_id: int
 
 
-def install_channels(app,engine,Record,Conversation,Message,authorize,session):
+def install_channels(app,engine,Record,Conversation,Message,authorize,session,configuration=None):
+    configuration=configuration or (lambda:dict(os.environ))
     def put(s,kind,rid,data):
         r=s.get(Record,rid)
         if r:r.data={**data,"id":rid}
@@ -27,7 +28,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session):
 
     @app.get('/webhooks/meta')
     def verify(request:Request):
-        expected=os.getenv('META_VERIFY_TOKEN')
+        expected=configuration().get('META_VERIFY_TOKEN')
         if not expected:raise HTTPException(503,'Meta verification is not configured')
         token=request.query_params.get('hub.verify_token','')
         if request.query_params.get('hub.mode')!='subscribe' or not hmac.compare_digest(token,expected):raise HTTPException(403,'Verification failed')
@@ -35,7 +36,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session):
 
     @app.post('/webhooks/meta')
     async def receive(request:Request,s:Session=Depends(session)):
-        secret=os.getenv('META_APP_SECRET')
+        secret=configuration().get('META_APP_SECRET')
         if not secret:raise HTTPException(503,'Meta app secret is not configured')
         if int(request.headers.get('content-length','0'))>2_000_000:raise HTTPException(413,'Webhook too large')
         raw=await request.body()
@@ -49,7 +50,8 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session):
         for entry in payload.get('entry',[])[:100]:
             for event in entry.get('messaging',[])[:100]:
                 page=str(event.get('recipient',{}).get('id',''))
-                if page!=os.getenv('META_PAGE_ID') or not page:continue
+                expected_account=configuration().get('INSTAGRAM_ACCOUNT_ID') if payload.get('object')=='instagram' else configuration().get('META_PAGE_ID')
+                if page!=expected_account or not page:continue
                 message=event.get('message',{})
                 if message.get('is_echo') or not message.get('mid'):continue
                 events.append({'channel':'Instagram' if payload.get('object')=='instagram' else 'Messenger','sender':str(event.get('sender',{}).get('id','')),'account':page,'message_id':message['mid'],'text':message.get('text') or '[Attachment received; open in the original channel]','timestamp':event.get('timestamp',0)/1000})
@@ -57,12 +59,12 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session):
                 value=change.get('value',{})
                 if change.get('field')=='messages':
                     phone=str(value.get('metadata',{}).get('phone_number_id',''))
-                    if not phone or phone!=os.getenv('WHATSAPP_PHONE_NUMBER_ID'):continue
+                    if not phone or phone!=configuration().get('WHATSAPP_PHONE_NUMBER_ID'):continue
                     for m in value.get('messages',[])[:100]:
                         events.append({'channel':'WhatsApp','sender':str(m.get('from','')),'account':phone,'message_id':m.get('id',''),'text':m.get('text',{}).get('body') or '[Media received; open in WhatsApp]','timestamp':float(m.get('timestamp',0))})
                 if change.get('field')=='feed' and value.get('item')=='comment' and value.get('verb')=='add':
                     page=str(entry.get('id',''))
-                    if page and page==os.getenv('META_PAGE_ID'):
+                    if page and page==configuration().get('META_PAGE_ID'):
                         events.append({'channel':'Facebook comments','sender':str(value.get('from',{}).get('id','')),'account':page,'message_id':value.get('comment_id',''),'text':value.get('message','[Comment]'),'timestamp':value.get('created_time',0)})
         count=0
         for e in events:
@@ -85,7 +87,8 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session):
             if not old or t.isoformat()>old:
                 d.update(last_inbound=t.isoformat(),last_verified_inbound=t.isoformat(),source='signed-meta-webhook',sender=e['sender'],account=e['account'],channel=e['channel'])
                 put(s,'conversation',f'conversation:{c.id}',d)
-            s.add(Message(conversation_id=c.id,role='customer',text=str(e['text'])[:8000]))
+            message=Message(conversation_id=c.id,role='customer',text=str(e['text'])[:8000]);s.add(message);s.flush()
+            app.state.queue_auto_draft(s,c.id,message.id)
             put(s,'inbound',dedup,{'conversation_id':c.id,'provider_id':e['message_id'],'created_at':datetime.now(timezone.utc).isoformat()})
             try:s.commit();count+=1
             except IntegrityError:s.rollback()  # Concurrent webhook retry; unique provider event wins once.
@@ -93,7 +96,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session):
 
     @app.post('/conversations/{cid}/deliver',dependencies=[Depends(authorize)])
     async def deliver(cid:int,body:DeliveryInput,s:Session=Depends(session)):
-        if os.getenv('ENABLE_LIVE_SEND')!='1':raise HTTPException(503,'Live delivery is disabled. Configure and verify the official channel, then explicitly enable it.')
+        if configuration().get('ENABLE_LIVE_SEND')!='1':raise HTTPException(503,'Live delivery is disabled. Configure and verify the official channel, then explicitly enable it.')
         c=s.get(Conversation,cid)
         if not c:raise HTTPException(404,'Conversation not found')
         if c.mode!='human':raise HTTPException(409,'Take over before delivering a team reply')
@@ -104,10 +107,10 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session):
         d=record.data
         age=datetime.now(timezone.utc)-datetime.fromisoformat(d['last_verified_inbound'])
         if not timedelta(0)<=age<timedelta(hours=23):raise HTTPException(409,'Outside the conservative reply window. Template messaging is not implemented.')
-        version=os.getenv('META_GRAPH_VERSION','')
+        version=configuration().get('META_GRAPH_VERSION','')
         if not re.fullmatch(r'v\d+\.\d+',version):raise HTTPException(503,'Set a supported META_GRAPH_VERSION, for example the version configured on your Meta app')
         if c.channel not in ['Messenger','Instagram','WhatsApp']:raise HTTPException(409,'This channel does not support this text transport')
-        token=os.getenv('WHATSAPP_ACCESS_TOKEN' if c.channel=='WhatsApp' else 'META_PAGE_ACCESS_TOKEN')
+        token=configuration().get('WHATSAPP_ACCESS_TOKEN') if c.channel=='WhatsApp' else (configuration().get('INSTAGRAM_ACCESS_TOKEN') or configuration().get('META_PAGE_ACCESS_TOKEN')) if c.channel=='Instagram' else configuration().get('META_PAGE_ACCESS_TOKEN')
         if not token:raise HTTPException(503,'Channel access token is missing')
         if c.channel=='WhatsApp':payload={'messaging_product':'whatsapp','recipient_type':'individual','to':d['sender'],'type':'text','text':{'body':message.text}}
         else:payload={'recipient':{'id':d['sender']},'messaging_type':'RESPONSE','message':{'text':message.text}}

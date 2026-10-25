@@ -1,1 +1,2 @@
-export default { async rewrites() { const backend=process.env.BACKEND_URL; return {beforeFiles:backend ? [{source:'/api/:path*',destination:`${backend.replace(/\/$/,'')}/:path*`}] : []}; } };
+// Native auth routes take precedence over the authenticated backend proxy.
+export default {serverExternalPackages:['pg','nodemailer']};

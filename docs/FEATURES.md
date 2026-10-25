@@ -2,7 +2,11 @@
 
 Reference: https://www.aipraktor.com/ (reviewed 25 October 2026). Implementations are original; this is a functional comparison, not a copy of the reference brand or site.
 
-## Completed in this increment
+## Account / worker increment
+
+See [ACCOUNTS_AND_JOBS.md](ACCOUNTS_AND_JOBS.md). Implemented since the original table below: Better Auth signup/login/reset, organizations and verified invitations, current membership/role enforcement, separate business schemas/files, signed proxy identities with replay protection, encrypted per-business channel settings/public callbacks and durable background draft preparation. Backend callback and job paths are tested; live provider/email delivery and browser UI verification remain pending.
+
+## Original workspace increment
 
 | Feature | Browser demo | FastAPI backend | External verification |
 |---|---|---|---|
@@ -32,15 +36,17 @@ Reference: https://www.aipraktor.com/ (reviewed 25 October 2026). Implementation
 
 ## Explicitly unfinished reference capabilities
 
-1. Multi-business signup, tenant isolation, separate user accounts, invitation acceptance, owner/agent/channel permissions. Current backend is **one shared workspace** with an admin token.
+1. Multi-business signup, separate accounts, invitation acceptance, business isolation and owner/admin/member mutation permissions are implemented in account mode. Channel-specific and assigned-chat-only permissions remain unfinished; the legacy admin-token workspace is separate.
 2. Fully automatic AI sales agent: customer intent, product carousels, tool-based order creation with customer confirmation, automatic escalation, bounded autonomous actions and safety evaluation.
 3. Image code/exact/perceptual matching pipeline and voice-to-validated-order flow.
 4. Meta OAuth onboarding, multi-page token lifecycle, attachment download, comment replies/private replies, account health and delivery receipts.
 5. Pathao/Steadfast courier booking and verified tracking webhooks.
-6. Durable background jobs, retries, scheduling, daily encrypted backups and operational monitoring.
+6. Durable background preparation jobs, leases, retries, scheduled reminder checks and worker-driven handover expiry are implemented. Automatic delivery, daily encrypted backups and operational monitoring remain unfinished.
 7. Verified bKash/Nagad/bank recharge, usage pricing, real credit ledger, low-balance email and billing-gated automatic processing.
 8. Browser push, installable PWA and Meta Business Suite Chrome copilot extension.
 9. PDF/document extraction, embeddings, semantic retrieval, catalog visual indexing and measured language-quality evaluations.
-10. Data export/deletion controls, retention jobs, production migrations, audit trails, account recovery and encrypted credentials for multiple businesses.
+10. Password reset and encrypted per-business channel credentials are implemented. Tenant deletion/export controls, retention jobs, operational schema migration/rollback, audit trails, key rotation and full account recovery operations remain unfinished.
 
 These items are **not represented as completed just because a menu exists**. Missing credentials block external verification; the other items still require implementation. The UI labels unavailable functions and draft-only workflows accordingly.
+
+The original table describes the earlier workspace increment. The account/worker document above supersedes its older single-workspace, invitation and background-preparation limitations. No fully autonomous sales or live courier/payment integration is claimed.

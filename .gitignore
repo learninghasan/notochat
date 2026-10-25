@@ -7,3 +7,8 @@ node_modules/
 .vercel/
 .pytest_cache/
 *.tsbuildinfo
+tenant-data/
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3

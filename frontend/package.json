@@ -5,10 +5,14 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "auth:migrate": "node scripts/migrate-auth.mjs"
   },
   "dependencies": {
+    "better-auth": "^1.7.12",
     "next": "^16.0.0",
+    "nodemailer": "^10.2.1",
+    "pg": "^8.23.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   }

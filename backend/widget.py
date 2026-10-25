@@ -18,18 +18,19 @@ class CustomerMessage(BaseModel):
     text: str = Field(min_length=1,max_length=4000)
 
 
-WIDGET_HTML='''<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NotoChat · Chat with us</title><style>*{box-sizing:border-box}body{margin:0;font:14px Arial;background:#f5f7fd;color:#293650;display:flex;flex-direction:column;height:100dvh}header{padding:20px;background:#315cde;color:white}header strong{font-size:19px}header p{font-size:12px;margin-bottom:0;color:#dbe6ff}main{padding:15px;flex:1;overflow:auto}form{padding:15px;display:flex;gap:8px;background:white}input{min-width:0;flex:1;padding:12px;border:1px solid #dce4f2;border-radius:8px}button{background:#315cde;color:white;border:0;padding:12px;border-radius:8px;cursor:pointer}button:disabled{opacity:.5}article{padding:12px 15px;border-radius:12px;background:white;line-height:1.8;margin-bottom:12px;white-space:pre-wrap;overflow-wrap:anywhere}.mine{background:#e4ebff;margin-left:28px}.note{font-size:11px;color:#8592aa;line-height:1.8;padding:0 15px}#error{font-size:12px;color:#b14343;padding:8px 15px}label{display:block;margin-bottom:12px}</style></head><body><header><strong>NotoChat</strong><p>Send a message to our team</p></header><main id="history"><p class="note">আপনার প্রশ্ন লিখুন। টিম এখানেই উত্তর দিতে পারবে।</p></main><div id="error" role="alert"></div><form id="start"><input aria-label="Your name" id="name" placeholder="আপনার নাম" maxlength="100" required><button>Start chat</button></form><form id="send" hidden style="display:none"><input aria-label="Your message" id="text" placeholder="আপনার মেসেজ…" maxlength="4000" required><button>Send</button></form><p class="note">No guaranteed response time. Avoid sharing passwords or payment card details.</p><script>
+WIDGET_HTML=r'''<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NotoChat · Chat with us</title><style>*{box-sizing:border-box}body{margin:0;font:14px Arial;background:#f5f7fd;color:#293650;display:flex;flex-direction:column;height:100dvh}header{padding:20px;background:#315cde;color:white}header strong{font-size:19px}header p{font-size:12px;margin-bottom:0;color:#dbe6ff}main{padding:15px;flex:1;overflow:auto}form{padding:15px;display:flex;gap:8px;background:white}input{min-width:0;flex:1;padding:12px;border:1px solid #dce4f2;border-radius:8px}button{background:#315cde;color:white;border:0;padding:12px;border-radius:8px;cursor:pointer}button:disabled{opacity:.5}article{padding:12px 15px;border-radius:12px;background:white;line-height:1.8;margin-bottom:12px;white-space:pre-wrap;overflow-wrap:anywhere}.mine{background:#e4ebff;margin-left:28px}.note{font-size:11px;color:#8592aa;line-height:1.8;padding:0 15px}#error{font-size:12px;color:#b14343;padding:8px 15px}label{display:block;margin-bottom:12px}</style></head><body><header><strong>NotoChat</strong><p>Send a message to our team</p></header><main id="history"><p class="note">আপনার প্রশ্ন লিখুন। টিম এখানেই উত্তর দিতে পারবে।</p></main><div id="error" role="alert"></div><form id="start"><input aria-label="Your name" id="name" placeholder="আপনার নাম" maxlength="100" required><button>Start chat</button></form><form id="send" hidden style="display:none"><input aria-label="Your message" id="text" placeholder="আপনার মেসেজ…" maxlength="4000" required><button>Send</button></form><p class="note">No guaranteed response time. Avoid sharing passwords or payment card details.</p><script>
 let token='';let sending=false;const $=id=>document.getElementById(id);
-async function request(path,options={}){const r=await fetch('/widget/'+path,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})}});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:'Request failed');return d;}
+async function request(path,options={}){const r=await fetch(location.pathname.replace(/\/widget$/,'')+'/widget/'+path,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})}});const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:'Request failed');return d;}
 async function refresh(){if(!token)return;try{const data=await request('messages');const fragment=document.createDocumentFragment();for(const m of data){const article=document.createElement('article');article.textContent=m.text;if(m.role==='customer')article.className='mine';fragment.append(article)}$('history').replaceChildren(fragment);}catch(e){$('error').textContent=e.message}}
 $('start').addEventListener('submit',async e=>{e.preventDefault();const b=e.target.querySelector('button');b.disabled=true;try{const d=await request('sessions',{method:'POST',body:JSON.stringify({name:$('name').value})});token=d.token;$('start').style.display='none';$('send').style.display='flex';$('text').focus();await refresh();}catch(e){$('error').textContent=e.message}finally{b.disabled=false}});
 $('send').addEventListener('submit',async e=>{e.preventDefault();if(sending)return;sending=true;const b=e.target.querySelector('button');b.disabled=true;try{await request('messages',{method:'POST',body:JSON.stringify({text:$('text').value})});$('text').value='';$('error').textContent='';await refresh()}catch(e){$('error').textContent=e.message}finally{sending=false;b.disabled=false}});setInterval(refresh,6000);
 </script></body></html>'''
 
 
-def install_widget(app,engine,Record,Conversation,Message,session):
+def install_widget(app,engine,Record,Conversation,Message,session,configuration=None):
+    configuration=configuration or (lambda:dict(os.environ))
     def enabled():
-        if os.getenv('WIDGET_ENABLED')!='1':raise HTTPException(503,'Website chat is not enabled')
+        if configuration().get('WIDGET_ENABLED')!='1':raise HTTPException(503,'Website chat is not enabled')
 
     def valid_session(request,s):
         enabled()
@@ -43,7 +44,7 @@ def install_widget(app,engine,Record,Conversation,Message,session):
     @app.get('/widget',response_class=HTMLResponse)
     def widget():
         enabled()
-        origins=os.getenv('WIDGET_FRAME_ANCESTORS',"'self'")
+        origins=configuration().get('WIDGET_FRAME_ANCESTORS',"'self'")
         return HTMLResponse(WIDGET_HTML,headers={'Content-Security-Policy':"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors "+origins,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'})
 
     @app.post('/widget/sessions')
@@ -81,7 +82,8 @@ def install_widget(app,engine,Record,Conversation,Message,session):
         now=datetime.now(timezone.utc)
         if r.data.get('last_sent') and (now-datetime.fromisoformat(r.data['last_sent'])).total_seconds()<2:raise HTTPException(429,'Please wait a moment before sending again')
         cid=r.data['conversation_id']
-        s.add(Message(conversation_id=cid,role='customer',text=body.text.strip()))
+        message=Message(conversation_id=cid,role='customer',text=body.text.strip());s.add(message);s.flush()
+        app.state.queue_auto_draft(s,cid,message.id)
         r.data={**r.data,'count':r.data['count']+1,'last_sent':now.isoformat()}
         meta=s.get(Record,f'conversation:{cid}');meta.data={**meta.data,'last_inbound':now.isoformat()}
         s.commit();return {'saved':True}

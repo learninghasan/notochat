@@ -1,7 +1,4 @@
 import os
-import tempfile
-os.environ["DATABASE_URL"]="sqlite:///"+tempfile.mktemp(suffix=".db")
-os.environ["APP_TOKEN"]="test-token"
 from fastapi.testclient import TestClient
 from main import app
 client=TestClient(app)
@@ -250,3 +247,15 @@ def test_order_idempotency_key_cannot_be_reused_with_changed_details():
     assert client.post('/orders',headers=headers,json=body).status_code==200
     body['address']='Different address, Dhaka'
     assert client.post('/orders',headers=headers,json=body).status_code==409
+
+
+def test_instagram_uses_its_own_account_id(monkeypatch):
+    import json,hashlib,hmac,time
+    monkeypatch.setenv('META_APP_SECRET','instagram-secret')
+    monkeypatch.setenv('META_PAGE_ID','fb-page')
+    monkeypatch.setenv('INSTAGRAM_ACCOUNT_ID','ig-account')
+    data={'object':'instagram','entry':[{'messaging':[{'sender':{'id':'ig-customer'},'recipient':{'id':'ig-account'},'timestamp':int(time.time()*1000),'message':{'mid':'ig-message','text':'Instagram inquiry'}}]}]}
+    raw=json.dumps(data).encode();signature='sha256='+hmac.new(b'instagram-secret',raw,hashlib.sha256).hexdigest()
+    r=client.post('/webhooks/meta',content=raw,headers={'x-hub-signature-256':signature})
+    assert r.status_code==200 and r.json()['stored']==1
+    assert any(c['channel']=='Instagram' and c['customer'].endswith('stomer') for c in client.get('/conversations',headers=headers).json())
