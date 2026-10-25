@@ -82,7 +82,7 @@ def create_workspace(engine, trusted_identity=False, seed_sample=True):
     @app.get("/conversations/{cid}/messages", dependencies=[Depends(authorize)])
     def messages(cid:int,s:Session=Depends(session)):
         conversation(s,cid)
-        return [{"id":m.id,"role":m.role,"text":m.text,"verified_comment":bool((proof:=s.get(Base.WorkspaceRecord,f"verified_message:{m.id}")) and proof.data.get("channel")=="Facebook comments")} for m in s.scalars(select(Message).where(Message.conversation_id==cid).order_by(Message.id))]
+        return [{"id":m.id,"role":m.role,"text":m.text,"rich":(rich.data if (rich:=s.get(Base.WorkspaceRecord,f"rich_message:{m.id}")) else None),"verified_comment":bool((proof:=s.get(Base.WorkspaceRecord,f"verified_message:{m.id}")) and proof.data.get("channel")=="Facebook comments")} for m in s.scalars(select(Message).where(Message.conversation_id==cid).order_by(Message.id))]
     @app.post("/conversations/{cid}/messages", dependencies=[Depends(authorize)])
     def reply(cid:int,body:Reply,s:Session=Depends(session)):
         c=conversation(s,cid)

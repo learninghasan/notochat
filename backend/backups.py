@@ -84,10 +84,21 @@ def backup(database_url,output,master):
     return output
 
 
+
+def verify_archive(path,master):
+    class Discard:
+        def write(self,chunk):return len(chunk)
+    with open(path,'rb') as source:decrypt_stream(source,Discard(),master)
+    return {'authenticated':True,'plaintext_written':False}
+
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--output',required=True);p.add_argument('--decrypt',action='store_true');p.add_argument('--input');args=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--output');p.add_argument('--verify',action='store_true');p.add_argument('--decrypt',action='store_true');p.add_argument('--input');args=p.parse_args()
     master=os.environ.get('BACKUP_ENCRYPTION_KEY','')
     if not master:raise SystemExit('Configure BACKUP_ENCRYPTION_KEY outside the database and backup directory')
+    if args.verify:
+        if not args.input:raise SystemExit("--input is required")
+        print(verify_archive(args.input,master));raise SystemExit(0)
+    if not args.output:raise SystemExit("--output is required")
     if args.decrypt:
         if not args.input:raise SystemExit('--input is required for decryption')
         path=Path(args.output)

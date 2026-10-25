@@ -13,6 +13,9 @@ class PushKeys(BaseModel):
     p256dh:str=Field(min_length=40,max_length=200,pattern=r'^[A-Za-z0-9_-]+=*$')
     auth:str=Field(min_length=16,max_length=100,pattern=r'^[A-Za-z0-9_-]+=*$')
 
+class RevokeMember(BaseModel):
+    user_id:str=Field(min_length=1,max_length=200,pattern=r'^[A-Za-z0-9_-]+$')
+
 class Subscription(BaseModel):
     endpoint:str=Field(max_length=3000)
     keys:PushKeys
@@ -27,12 +30,41 @@ class Subscription(BaseModel):
 
 def install_push(app,engine,Record,authorize,session,put):
     def configured():return all(os.getenv(k) for k in ('VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT'))
+    @app.post('/push/revoke-member',dependencies=[Depends(authorize)])
+    def revoke(body:RevokeMember,principal=Depends(authorize),s=Depends(session)):
+        if not principal or principal.get('service_event')!='member-removal' or principal.get('user_id')!='auth-membership-hook':raise HTTPException(403,'Verified authentication-service removal event required')
+        put(s,'push_revoked',{'user_id':body.user_id},'push_revoked:'+body.user_id)
+        subscriptions=list(s.scalars(select(Record).where(Record.kind=='push_subscriptions',Record.data['user_id'].as_string()==body.user_id)))
+        ids={r.id for r in subscriptions}
+        for delivery in s.scalars(select(Record).where(Record.kind=='push_delivery')):
+            if delivery.data.get('subscription_id') in ids:delivery.data={**delivery.data,'status':'cancelled'}
+        for r in subscriptions:s.delete(r)
+        s.commit();return {'revoked':len(ids)}
+
+    @app.post('/push/restore-member',dependencies=[Depends(authorize)])
+    def restore_member(body:RevokeMember,principal=Depends(authorize),s=Depends(session)):
+        if not principal or principal.get('service_event')!='member-added' or principal.get('user_id')!='auth-membership-hook':raise HTTPException(403,'Verified authentication-service addition event required')
+        r=s.get(Record,'push_revoked:'+body.user_id)
+        if r:s.delete(r);s.commit()
+        return {'restored':True}
+
+    @app.post('/push/revoke-organization',dependencies=[Depends(authorize)])
+    def revoke_organization(principal=Depends(authorize),s=Depends(session)):
+        if not principal or principal.get('service_event')!='organization-removal' or principal.get('user_id')!='auth-membership-hook':raise HTTPException(403,'Verified authentication-service organization removal required')
+        for r in s.scalars(select(Record).where(Record.kind=='push_subscriptions')):s.delete(r)
+        for r in s.scalars(select(Record).where(Record.kind=='push_delivery')):r.data={**r.data,'status':'cancelled'}
+        now=datetime.now(timezone.utc)
+        existing=s.get(Record,'workspace:lifecycle')
+        if not existing or existing.data.get('status')!='purged':put(s,'workspace_lifecycle',{'status':'quarantined','reason':'Authentication organization removed','quarantined_at':now.isoformat(),'purge_after':(now+timedelta(days=7)).isoformat()},'workspace:lifecycle')
+        s.commit();return {'quarantined':True,'permanently_deleted':False}
+
     @app.get('/push/config',dependencies=[Depends(authorize)])
     def config():return {'enabled':bool(configured()),'public_key':os.getenv('VAPID_PUBLIC_KEY','') if configured() else ''}
 
     @app.post('/push/subscriptions',dependencies=[Depends(authorize)])
     def subscribe(body:Subscription,principal=Depends(authorize),s:Session=Depends(session)):
         if not configured():raise HTTPException(503,'Browser push VAPID keys are not configured')
+        if principal and s.get(Record,'push_revoked:'+principal['user_id']):raise HTTPException(403,'Membership device access is revoked; rejoining requires a fresh membership event')
         rid='push:'+hashlib.sha256(body.endpoint.encode()).hexdigest()
         put(s,'push_subscriptions',{**body.model_dump(),'user_id':principal['user_id'] if principal else 'legacy-owner'},rid);s.commit();return {'subscribed':True}
 

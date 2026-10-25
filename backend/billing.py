@@ -19,6 +19,8 @@ class Recharge(BaseModel):
 
 
 def install_billing(app,engine,Record,authorize,session,put,notify,records):
+    from billing_email import install_email
+    install_email(app,engine,Record,authorize,session,put)
     def enabled():return os.getenv('AI_BILLING_ENABLED')=='1' or os.getenv('APP_ENV')=='production'
     def provider():
         if not os.getenv('SSLCOMMERZ_STORE_ID') or not os.getenv('SSLCOMMERZ_STORE_PASSWORD'):raise HTTPException(503,'Hosted recharge gateway is not configured')
@@ -32,7 +34,13 @@ def install_billing(app,engine,Record,authorize,session,put,notify,records):
 
     def require_credit(s,action='text'):
         if not enabled():return
-        if action=='audio':raise HTTPException(503,'Audio pricing is not configured for credit-metered use')
+        if action=='audio':
+            try:
+                rate=Decimal(os.getenv('AI_AUDIO_PAISA_PER_MINUTE','0'))
+                if not rate.is_finite() or rate<=0:raise ValueError()
+            except (InvalidOperation,ValueError):raise HTTPException(503,'Operator must configure and disclose audio pricing')
+            if wallet(s).data['balance_paisa']<=0:raise HTTPException(402,'AI credit exhausted. Recharge to resume automatic processing.')
+            return
         try:
             rates=[Decimal(os.getenv(key,'0')) for key in ['AI_INPUT_PAISA_PER_MILLION','AI_OUTPUT_PAISA_PER_MILLION']]
             if any(not rate.is_finite() or rate<=0 for rate in rates):raise ValueError()
@@ -43,18 +51,27 @@ def install_billing(app,engine,Record,authorize,session,put,notify,records):
         if not enabled():return
         rid='ledger:usage:'+hashlib.sha256(usage['id'].encode()).hexdigest()
         if s.get(Record,rid):return
-        tokens=usage.get('tokens',{})
-        if any(not isinstance(tokens.get(k),int) or isinstance(tokens.get(k),bool) or tokens[k]<0 for k in ['input_tokens','output_tokens']):raise HTTPException(502,'Provider did not report billable token usage')
-        input_rate=Decimal(os.getenv('AI_INPUT_PAISA_PER_MILLION','0'));output_rate=Decimal(os.getenv('AI_OUTPUT_PAISA_PER_MILLION','0'))
-        if input_rate<=0 or output_rate<=0:raise HTTPException(503,'AI usage rates are not configured')
-        cost=int(((Decimal(tokens['input_tokens'])*input_rate+Decimal(tokens['output_tokens'])*output_rate)/1000000).to_integral_value(rounding=ROUND_CEILING))
+        if usage.get('action')=='audio':
+            try:
+                duration=Decimal(str(usage.get('duration_seconds','NaN')));rate=Decimal(os.getenv('AI_AUDIO_PAISA_PER_MINUTE','0'))
+                if not duration.is_finite() or duration<=0 or not rate.is_finite() or rate<=0:raise ValueError()
+            except (InvalidOperation,ValueError):raise HTTPException(502,'Provider duration and configured audio rate are required; no fabricated charge')
+            cost=int((duration*rate/60).to_integral_value(rounding=ROUND_CEILING));input_rate=rate;output_rate=Decimal(0)
+        else:
+            tokens=usage.get('tokens',{})
+            if any(not isinstance(tokens.get(k),int) or isinstance(tokens.get(k),bool) or tokens[k]<0 for k in ['input_tokens','output_tokens']):raise HTTPException(502,'Provider did not report billable token usage')
+            input_rate=Decimal(os.getenv('AI_INPUT_PAISA_PER_MILLION','0'));output_rate=Decimal(os.getenv('AI_OUTPUT_PAISA_PER_MILLION','0'))
+            if input_rate<=0 or output_rate<=0:raise HTTPException(503,'AI usage rates are not configured')
+            cost=int(((Decimal(tokens['input_tokens'])*input_rate+Decimal(tokens['output_tokens'])*output_rate)/1000000).to_integral_value(rounding=ROUND_CEILING))
         w=wallet(s);previous=w.data['balance_paisa'];w.data={**w.data,'balance_paisa':previous-cost}
-        put(s,'ledger',{'type':'usage','paisa':-cost,'usage_id':usage['id'],'input_rate':str(input_rate),'output_rate':str(output_rate),'created_at':datetime.now(timezone.utc).isoformat()},rid)
-        if previous>100 and w.data['balance_paisa']<=100:notify(s,'AI credit is low','Recharge your workspace to keep automatic processing available.')
+        put(s,'ledger',{'type':'usage','paisa':-cost,'usage_id':usage['id'],'action':usage.get('action','text'),'duration_seconds':usage.get('duration_seconds'),'input_rate':str(input_rate),'output_rate':str(output_rate),'created_at':datetime.now(timezone.utc).isoformat()},rid)
+        if previous>100 and w.data['balance_paisa']<=100:
+            notify(s,'AI credit is low','Recharge your workspace to keep automatic processing available.')
+            app.state.queue_credit_email(s,hashlib.sha256(usage['id'].encode()).hexdigest())
 
     def snapshot(s):
         w=wallet(s)
-        return {'currency':'BDT','balance':w.data['balance_paisa']/100,'balance_paisa':w.data['balance_paisa'],'sandbox_balance':w.data.get('sandbox_balance_paisa',0)/100,'metering_enabled':enabled(),'payments_connected':bool(os.getenv('SSLCOMMERZ_STORE_ID') and os.getenv('SSLCOMMERZ_STORE_PASSWORD')),'sandbox':os.getenv('SSLCOMMERZ_LIVE')!='1','usage':records(s,'usage'),'ledger':records(s,'ledger'),'pricing':{'input_paisa_per_million':os.getenv('AI_INPUT_PAISA_PER_MILLION'),'output_paisa_per_million':os.getenv('AI_OUTPUT_PAISA_PER_MILLION')},'note':'Recharge credits are posted only after server-to-server validation. Sandbox payments are test credits. Usage metering is '+('enabled at the displayed operator-configured rates.' if enabled() else 'disabled; no AI credit deductions are applied.')}
+        return {'currency':'BDT','balance':w.data['balance_paisa']/100,'balance_paisa':w.data['balance_paisa'],'sandbox_balance':w.data.get('sandbox_balance_paisa',0)/100,'metering_enabled':enabled(),'payments_connected':bool(os.getenv('SSLCOMMERZ_STORE_ID') and os.getenv('SSLCOMMERZ_STORE_PASSWORD')),'sandbox':os.getenv('SSLCOMMERZ_LIVE')!='1','usage':records(s,'usage'),'ledger':records(s,'ledger'),'pricing':{'audio_paisa_per_minute':os.getenv('AI_AUDIO_PAISA_PER_MINUTE'),'input_paisa_per_million':os.getenv('AI_INPUT_PAISA_PER_MILLION'),'output_paisa_per_million':os.getenv('AI_OUTPUT_PAISA_PER_MILLION')},'note':'Recharge credits are posted only after server-to-server validation. Sandbox payments are test credits. Usage metering is '+('enabled at the displayed operator-configured rates.' if enabled() else 'disabled; no AI credit deductions are applied.')}
     app.state.require_credit=require_credit;app.state.charge_usage=charge;app.state.billing_snapshot=snapshot
 
     @app.post('/billing/recharge',dependencies=[Depends(authorize)])

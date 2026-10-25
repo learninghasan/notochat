@@ -16,8 +16,10 @@ async def tick():
     total=0
     for app in apps:
         try:
+            if not app.state.workspace_active():continue
             total+=len(await app.state.run_jobs())
             await asyncio.to_thread(app.state.flush_push)
+            await asyncio.to_thread(app.state.flush_credit_email)
         except Exception:logging.exception('Workspace job processing failed')
     return total
 

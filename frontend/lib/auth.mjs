@@ -3,8 +3,9 @@ import {organization} from 'better-auth/plugins/organization';
 import {nextCookies} from 'better-auth/next-js';
 import pg from 'pg';
 import nodemailer from 'nodemailer';
+import {revokeMemberDevices,quarantineOrganizationDevices} from './member-devices.mjs';
 
-export function makeAuth({database,secret,baseURL,sendMail,requireVerification=true}){
+export function makeAuth({database,secret,baseURL,sendMail,requireVerification=true,onMemberRemoval=async()=>{},onMemberAdded=async()=>{},onOrganizationRemoval=async()=>{}}){
  if(!secret||secret.length<32)throw Error('BETTER_AUTH_SECRET must contain at least 32 characters');
  return betterAuth({
   database,secret,baseURL,
@@ -12,7 +13,7 @@ export function makeAuth({database,secret,baseURL,sendMail,requireVerification=t
   emailVerification:{sendOnSignUp:requireVerification,sendVerificationEmail:async({user,url})=>sendMail({to:user.email,subject:'Verify your NotoChat email',text:`Verify your email: ${url}`})},
   session:{cookieCache:{enabled:false},expiresIn:60*60*24*7,updateAge:60*60*24},
   rateLimit:{enabled:true,storage:'database',window:60,max:60,customRules:{'/sign-in/email':{window:60,max:5},'/sign-up/email':{window:60,max:3}}},
-  plugins:[organization({membershipLimit:100,organizationLimit:10,requireEmailVerificationOnInvitation:true,sendInvitationEmail:async data=>sendMail({to:data.email,subject:`Join ${data.organization.name} on NotoChat`,text:`You were invited to ${data.organization.name}. Sign in using this email and accept invitation ${data.id} at ${baseURL}/?invitation=${encodeURIComponent(data.id)}`})}),nextCookies()],
+  plugins:[organization({organizationHooks:{beforeRemoveMember:onMemberRemoval,afterAddMember:onMemberAdded,beforeDeleteOrganization:onOrganizationRemoval},membershipLimit:100,organizationLimit:10,requireEmailVerificationOnInvitation:true,sendInvitationEmail:async data=>sendMail({to:data.email,subject:`Join ${data.organization.name} on NotoChat`,text:`You were invited to ${data.organization.name}. Sign in using this email and accept invitation ${data.id} at ${baseURL}/?invitation=${encodeURIComponent(data.id)}`})}),nextCookies()],
  });
 }
 let instance;
@@ -28,6 +29,6 @@ export async function getAuth(){
  const mailConfigured=Boolean(process.env.SMTP_HOST&&process.env.SMTP_FROM);
  if(process.env.NODE_ENV==='production'&&!mailConfigured)throw Error('SMTP_HOST and SMTP_FROM are required for verified signup and invitations');
  const transporter=mailConfigured?nodemailer.createTransport({host:process.env.SMTP_HOST,port:Number(process.env.SMTP_PORT||587),secure:process.env.SMTP_SECURE==='1',auth:process.env.SMTP_USER?{user:process.env.SMTP_USER,pass:process.env.SMTP_PASSWORD}:undefined}):null;
- instance=makeAuth({database,secret,baseURL,requireVerification:mailConfigured||process.env.NODE_ENV==='production',sendMail:async data=>{if(!transporter)throw Error('Email delivery is not configured');await transporter.sendMail({...data,from:process.env.SMTP_FROM})}});
+ instance=makeAuth({database,secret,baseURL,onOrganizationRemoval:quarantineOrganizationDevices,onMemberRemoval:revokeMemberDevices,onMemberAdded:data=>revokeMemberDevices(data,true),requireVerification:mailConfigured||process.env.NODE_ENV==='production',sendMail:async data=>{if(!transporter)throw Error('Email delivery is not configured');await transporter.sendMail({...data,from:process.env.SMTP_FROM})}});
  return instance;
 }

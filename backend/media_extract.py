@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 def extract(raw,mime,kind):
-    if kind not in ('document','video') or len(raw)>8_000_000:raise HTTPException(422,'Unsupported or oversized media')
+    if kind not in ('document','video','image') or len(raw)>8_000_000:raise HTTPException(422,'Unsupported or oversized media')
     with tempfile.TemporaryDirectory(prefix='notochat-media-') as temporary:
         root=Path(temporary);source=root/'input';source.write_bytes(raw)
         try:

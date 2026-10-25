@@ -55,7 +55,7 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
                 return await dispatch(c,prior.data['message_id'],s)
             return prior.data
         if not any(word in norm(m.text) for word in ['refund','complaint','ফেরত চাই','অভিযোগ','টাকা ফেরত']):
-            intake=app.state.booking_intake_response(s,cid,m.text)
+            intake=app.state.capture_rating(s,cid,m.text) or app.state.booking_intake_response(s,cid,m.text)
             if intake is not None:
                 message=Message(conversation_id=cid,role='team',text=intake[:8000]);s.add(message);s.flush()
                 put(s,'sales',{'conversation_id':cid,'message_id':message.id,'created_at':now.isoformat()},rid);s.commit()
@@ -119,6 +119,7 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
             s.refresh(c)
             newest=s.scalar(select(Message).where(Message.conversation_id==cid,Message.role=='customer').order_by(Message.id.desc()).limit(1))
             if c.mode!='ai' or newest.id!=mid:s.commit();return {'skipped':'Conversation changed during generation','sent':False}
+            products=catalog('',s)[:100]
             selected=[p for p in products if p['id'] in intent.product_ids]
             if len(selected)!=len(set(intent.product_ids)):text=handover('AI selected an unknown catalog item')
             elif intent.intent=='greeting':
@@ -149,8 +150,19 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
                     put(s,'checkout',proposal,f'checkout:{cid}')
                     text='\n'.join(f"{line['name']} × {line['quantity']} · ৳{line['unit_price']} = ৳{line['unit_price']*line['quantity']}" for line in lines)+f"\n{intent.customer}\n{intent.phone}\n{intent.address}\n"+say('ডেলিভারি ৳','Delivery BDT ')+str(charge)+say(' সহ মোট ৳',' · Total BDT ')+str(total)+'\n'+say('ক্যাশ অন ডেলিভারি। সব ঠিক থাকলে লিখুন: ','Cash on delivery. If all details are correct, reply: ')+f'CONFIRM {code}'
             else:text=handover('Customer request needs a human')
+        if live.get('natural_replies') and 'intent' in locals() and intent.intent in ('greeting','catalog','product','delivery','returns') and c.mode=='ai':
+            from natural_reply import phrase
+            text=await phrase(app,s,put,cid,m.text,text,live.get('language','Auto'),live.get('tone','Friendly'))
+            s.refresh(c)
+            newest=s.scalar(select(Message).where(Message.conversation_id==cid,Message.role=='customer').order_by(Message.id.desc()).limit(1))
+            if c.mode!='ai' or newest.id!=mid:s.commit();return {'sent':False,'skipped':'Conversation changed during phrasing'}
+        if 'intent' in locals() and intent.intent in ('catalog','product'):
+            fresh={p['id']:p for p in catalog('',s)}
+            if any(p['id'] not in fresh or any(fresh[p['id']][k]!=p[k] for k in ('name','price','stock')) for p in (selected or products[:3])):
+                notify(s,'Catalog changed during AI reply','Review the latest customer inquiry before replying.',cid);s.commit();return {'sent':False,'skipped':'Catalog changed during phrasing'}
         # Save response and its receipt atomically. Replayed jobs reuse the same message.
         message=Message(conversation_id=cid,role='team',text=text[:8000]);s.add(message);s.flush()
+        if 'intent' in locals() and intent.intent in ('catalog','product') and c.mode=='ai' and (selected or products):app.state.attach_catalog(s,cid,message.id,[p['id'] for p in (selected or products[:3])])
         put(s,'sales',{'conversation_id':cid,'message_id':message.id,'created_at':now.isoformat()},rid);s.commit()
         return await dispatch(c,message.id,s)
 

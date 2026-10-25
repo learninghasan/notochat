@@ -82,6 +82,7 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
         return None
 
     async def run_jobs(limit=20):
+        if hasattr(app.state,'workspace_active') and not app.state.workspace_active():return []
         processed=[]
         with Session(engine) as s:expire(s)
         for _ in range(limit):
@@ -109,7 +110,7 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
                         notify(s,'Reminder ready for review' if eligible else 'Reminder blocked by reply window',a.data['text'],c.id)
                         output={'prepared':eligible,'sent':False}
                         if a.data.get('auto_send'):
-                            output=await app.state.deliver_outreach(s,c.id,a.data['text'],rid,a.data['kind'] in ('followup','review'))
+                            output=await app.state.deliver_outreach(s,c.id,a.data['text'],rid,a.data['kind'] in ('followup','review'),a.data.get('tracking_url'))
                             a=s.get(Record,payload['automation_id']);a.data={**a.data,'status':'sent' if output.get('sent') else 'blocked','delivery':'sent' if output.get('sent') else output.get('blocked','not sent')}
                     elif data['kind']=='ai_draft':
                         latest=s.scalar(select(Message).where(Message.conversation_id==c.id,Message.role=='customer').order_by(Message.id.desc()).limit(1))

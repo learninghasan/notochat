@@ -105,7 +105,7 @@ Tests cover stock atomicity/idempotency, order transitions, booking overlap/remi
 
 ## Deployment limits
 
-Core courier/recharge adapters, channel access, push and bounded automatic sales are implemented but require configuration and live verification. Advanced reference features and production operations remain unfinished; see the current feature map. Directory entries are profiles; real account members/invitations are managed separately with Better Auth; advance amounts are unverified; reminder/broadcast entries are drafts. Database schema creation is additive via SQLAlchemy create_all; managed migration/rollback and backup procedures are still required. Review [FEATURES.md](docs/FEATURES.md) before onboarding real businesses.
+Core courier/recharge adapters, channel access, push and bounded automatic sales are implemented but require configuration and live verification. The bounded original-scope implementation and remaining live/access/policy prerequisites are recorded in docs/FINAL_SCOPE_AND_OPERATIONS.md. Directory entries are profiles; real account members/invitations are managed separately with Better Auth; advance amounts are unverified; reminder/broadcast entries are drafts. Current schema baseline version 1 and drift/newer-version guards are implemented. Future schema changes require explicit migrations; production backup/restore setup remains required. Review [FEATURES.md](docs/FEATURES.md) before onboarding real businesses.
 
 ### Meta OAuth, outreach and browser copilot
 

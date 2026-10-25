@@ -10,7 +10,23 @@ resource.setrlimit(resource.RLIMIT_NOFILE,(48,48))
 os.umask(0o077)
 mode,mime,input_path,output_path=sys.argv[1:]
 source=Path(input_path);output=Path(output_path)
-if mode=='document':
+if mode=='image':
+    import base64,hashlib,warnings
+    from PIL import Image,ImageOps
+    Image.MAX_IMAGE_PIXELS=16_000_000
+    warnings.simplefilter('error',Image.DecompressionBombWarning)
+    if source.stat().st_size>4_000_000:raise ValueError('Image too large')
+    with Image.open(source) as original:
+        if original.format not in ('JPEG','PNG','WEBP') or getattr(original,'n_frames',1)!=1:raise ValueError('Use a single JPEG/PNG/WebP image')
+        original.load();canonical=ImageOps.exif_transpose(original).convert('RGBA')
+    exact=hashlib.sha256(str(canonical.size).encode()+canonical.tobytes()).hexdigest()
+    picture=Image.alpha_composite(Image.new('RGBA',canonical.size,'white'),canonical).convert('RGB')
+    small=picture.convert('L').resize((9,8));pixels=list(small.getdata())
+    bits=''.join('1' if pixels[y*9+x]>pixels[y*9+x+1] else '0' for y in range(8) for x in range(8))
+    picture.thumbnail((256,256));hist=picture.histogram();features=[sum(hist[c*256+i:c*256+i+16]) for c in range(3) for i in range(0,256,16)]
+    buffer=io.BytesIO();picture.save(buffer,format='JPEG',quality=75)
+    (output/'result.json').write_text(json.dumps({'exact':exact,'dhash':hex(int(bits,2)),'histogram':features,'thumbnail':base64.b64encode(buffer.getvalue()).decode()}))
+elif mode=='document':
     raw=source.read_bytes()
     if len(raw)>5_000_000:raise ValueError('Document too large')
     if mime=='application/pdf':

@@ -49,10 +49,30 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
         events=[]
         for entry in payload.get('entry',[])[:100]:
             for event in entry.get('messaging',[])[:100]:
+                echo=event.get('message',{})
+                if payload.get('object')=='page' and echo.get('is_echo') and echo.get('mid') and echo.get('text','').strip()=='.' and not echo.get('app_id'):
+                    page_id=str(event.get('sender',{}).get('id',''));customer_id=str(event.get('recipient',{}).get('id',''))
+                    if page_id==str(entry.get('id','')) and app.state.channel_account('Messenger',page_id):
+                        mapping='channel:'+hashlib.sha256(json.dumps(['Messenger',page_id,customer_id],separators=(',',':')).encode()).hexdigest()
+                        mapped=s.get(Record,mapping);key='native-claim:'+hashlib.sha256((page_id+':'+echo['mid']).encode()).hexdigest()
+                        try:recent=timedelta(0)<=datetime.now(timezone.utc)-datetime.fromtimestamp(event.get('timestamp',0)/1000,timezone.utc)<timedelta(hours=1)
+                        except (ValueError,TypeError,OverflowError):recent=False
+                        if mapped and recent and not s.get(Record,key):
+                            c=s.get(Conversation,mapped.data['conversation_id']);c.mode='human'
+                            meta=s.get(Record,f'conversation:{c.id}');d=meta.data if meta else {}
+                            put(s,'conversation',f'conversation:{c.id}',{**d,'reason':'Native Messenger page staff sent .','assignee':'Page staff (identity not supplied by provider)','handover_until':(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()})
+                            put(s,'inbound',key,{'conversation_id':c.id,'provider_id':echo['mid'],'source':'signed-native-page-echo'})
+                            try:s.commit()
+                            except IntegrityError:s.rollback()
+                    continue
                 page=str(event.get('recipient',{}).get('id',''))
                 channel='Instagram' if payload.get('object')=='instagram' else 'Messenger'
                 if not app.state.channel_account(channel,page):continue
                 message=event.get('message',{})
+                postback=event.get('postback',{})
+                if postback.get('mid') and re.fullmatch(r'(?:PRODUCT:\d+|CATEGORY:.{1,80})',postback.get('payload','')):
+                    message={'mid':postback['mid'],'text':postback['payload']}
+                if message.get('quick_reply',{}).get('payload'):message={**message,'text':message['quick_reply']['payload']}
                 if message.get('is_echo') or not message.get('mid'):continue
                 events.append({'channel':'Instagram' if payload.get('object')=='instagram' else 'Messenger','sender':str(event.get('sender',{}).get('id','')),'account':page,'message_id':message['mid'],'text':message.get('text') or '[Attachment received; open in the original channel]','timestamp':event.get('timestamp',0)/1000,'attachments':message.get('attachments',[])[:3]})
             for change in entry.get('changes',[])[:100]:
@@ -61,7 +81,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
                     phone=str(value.get('metadata',{}).get('phone_number_id',''))
                     if not app.state.channel_account('WhatsApp',phone):continue
                     for m in value.get('messages',[])[:100]:
-                        events.append({'channel':'WhatsApp','sender':str(m.get('from','')),'account':phone,'message_id':m.get('id',''),'text':m.get('text',{}).get('body') or '[Media received; open in WhatsApp]','timestamp':float(m.get('timestamp',0)),'attachments':[{**m.get(m.get('type'),{}),'type':m.get('type')}] if m.get('type') in ('image','audio','video','document') else []})
+                        events.append({'channel':'WhatsApp','sender':str(m.get('from','')),'account':phone,'message_id':m.get('id',''),'text':m.get('text',{}).get('body') or m.get('interactive',{}).get('list_reply',{}).get('id') or '[Media received; open in WhatsApp]','timestamp':float(m.get('timestamp',0)),'attachments':[{**m.get(m.get('type'),{}),'type':m.get('type')}] if m.get('type') in ('image','audio','video','document') else []})
                 if change.get('field')=='feed' and value.get('item')=='comment' and value.get('verb')=='add':
                     page=str(entry.get('id',''))
                     if app.state.channel_account('Facebook comments',page) and str(value.get('from',{}).get('id',''))!=page:
@@ -96,6 +116,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
                 put(s,'conversation',f'conversation:{c.id}',d)
             message=Message(conversation_id=c.id,role='customer',text=str(e['text'])[:8000]);s.add(message);s.flush()
             put(s,'verified_message',f'verified_message:{message.id}',{'conversation_id':c.id,'message_id':message.id,'source':'signed-meta-webhook','channel':e['channel'],'account':e['account'],'provider_id':e['message_id'],'received_at':t.isoformat()})
+            if not e.get('attachments'):app.state.capture_rating(s,c.id,message.text)
             app.state.ingest_attachments(s,c.id,message.id,e)
             app.state.queue_auto_draft(s,c.id,message.id)
             put(s,'inbound',dedup,{'conversation_id':c.id,'provider_id':e['message_id'],'created_at':datetime.now(timezone.utc).isoformat()})
@@ -104,6 +125,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
         return {'received':True,'stored':count,'auto_replied':False}
 
     async def send_message(cid,body,s,automated=False):
+        if not app.state.workspace_active():raise HTTPException(423,'Workspace is paused')
         if configuration().get('ENABLE_LIVE_SEND')!='1':raise HTTPException(503,'Live delivery is disabled. Configure and verify the official channel, then explicitly enable it.')
         c=s.get(Conversation,cid)
         if not c:raise HTTPException(404,'Conversation not found')
@@ -125,6 +147,8 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
         if not token:raise HTTPException(503,'Channel access token is missing')
         if c.channel=='WhatsApp':payload={'messaging_product':'whatsapp','recipient_type':'individual','to':d['sender'],'type':'text','text':{'body':message.text}}
         else:payload={'recipient':{'id':d['sender']},'messaging_type':'RESPONSE','message':{'text':message.text}}
+        rich=app.state.rich_payload(s,cid,message.id,c.channel,d['sender'])
+        if rich:payload=rich
         rid=f'delivery:{message.id}'
         existing=s.get(Record,rid)
         if existing:

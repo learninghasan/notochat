@@ -14,6 +14,10 @@ def install_lifecycle(app,Record,put):
             due=base+timedelta(hours=1 if data['temperature']=='Hot' else 4)
             if due<=now:return
             label='followup';text='আপনার পছন্দের পণ্য নিয়ে কোনো প্রশ্ন আছে? / Any questions about the products you were interested in?';state='followup'
+        elif kind=='orders' and status=='confirmed':
+            if not live.get('collect_ratings'):return
+            rating=app.state.rating_prompt(s,source);label='review';state='rating';due=now+timedelta(minutes=2)
+            text='How was your ordering experience? / অর্ডারের অভিজ্ঞতা কেমন? Reply RATE '+rating['code']+' 1–5 (5 = best).'
         elif kind=='orders' and status=='shipped':
             label='delivery';text='আপনার অর্ডার পাঠানো হয়েছে। / Your order has shipped. Tracking reference: '+data.get('tracking','');due=now;state='shipped'
         elif kind=='orders' and status=='delivered':
@@ -23,7 +27,7 @@ def install_lifecycle(app,Record,put):
         key=f'automations:lifecycle:{source.id}:{state}'
         if s.get(Record,key):return
         automatic=bool(live.get('auto_lifecycle'))
-        d=put(s,'automations',{'conversation_id':cid,'kind':label,'text':text,'due_at':due.isoformat(),'status':'scheduled' if automatic else 'draft','delivery':'not sent','auto_send':automatic,'source_id':source.id,'source_kind':kind,'source_state':state,'source_inbound':last},key)
+        d=put(s,'automations',{'conversation_id':cid,'kind':label,'text':text,'due_at':due.isoformat(),'status':'scheduled' if automatic else 'draft','delivery':'not sent','auto_send':automatic,'source_id':source.id,'source_kind':kind,'source_state':state,'source_inbound':last,'tracking_url':data.get('tracking_url','') if state=='shipped' else ''},key)
         if automatic:app.state.enqueue(s,'reminder_prepare',{'automation_id':key,'conversation_id':cid},due=due,key='reminder-'+key)
         return d
     def valid(s,data):
@@ -36,7 +40,12 @@ def install_lifecycle(app,Record,put):
         if source.kind=='leads':
             meta=s.get(Record,f"conversation:{data['conversation_id']}")
             return bool(current.get('stage') not in ('Won','Lost') and current.get('temperature') in live.get('followup_temperatures',['Hot','Warm']) and meta and meta.data.get('last_verified_inbound')==data.get('source_inbound'))
-        if source.kind=='orders':return current.get('status')==data['source_state']
+        if source.kind=='orders':
+            if data['source_state']=='rating':return current.get('status')!='cancelled' and live.get('collect_ratings',False)
+            if data.get('expected_delivery_at'):
+                planned=datetime.fromisoformat(data['expected_delivery_at'])
+                if data['expected_delivery_at']!=current.get('expected_delivery_at') or data.get('tracking_url')!=current.get('tracking_url') or datetime.now(timezone.utc).astimezone(planned.tzinfo).date()!=planned.date():return False
+            return current.get('status')==data['source_state']
         if source.kind=='bookings':return current.get('status')=='confirmed'
         return False
     app.state.schedule_lifecycle=schedule;app.state.lifecycle_source_valid=valid

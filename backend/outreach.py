@@ -17,6 +17,7 @@ class ConfirmBroadcast(BaseModel):
 def install_outreach(app,Record,Conversation,Message,authorize,session,put,notify):
     def now():return datetime.now(timezone.utc)
     def eligibility(s,cid,marketing=False):
+        if not app.state.workspace_active():return False,'Workspace is paused'
         c=s.get(Conversation,cid);m=s.get(Record,f'conversation:{cid}')
         if not c or not m:return False,'Verified customer source is required'
         d=m.data
@@ -52,7 +53,7 @@ def install_outreach(app,Record,Conversation,Message,authorize,session,put,notif
             else:blocked.append({'conversation_id':cid,'reason':reason})
         b.data={**b.data,'status':'queued' if ids else 'completed','queued_ids':ids,'blocked':blocked};s.commit();return b.data
 
-    async def deliver(s,cid,text,key,marketing=False):
+    async def deliver(s,cid,text,key,marketing=False,tracking_url=None):
         allowed,reason=eligibility(s,cid,marketing)
         if not allowed:return {'sent':False,'blocked':reason}
         r=s.get(Record,'outreach:'+key)
@@ -60,6 +61,7 @@ def install_outreach(app,Record,Conversation,Message,authorize,session,put,notif
         else:
             message=Message(conversation_id=cid,role='team',text=text);s.add(message);s.flush();message_id=message.id
             put(s,'outreach',{'conversation_id':cid,'message_id':message_id,'marketing':marketing},'outreach:'+key)
+            if tracking_url:put(s,'rich_message',{'conversation_id':cid,'message_id':message_id,'kind':'link','tracking_url':tracking_url,'products':[],'categories':[]},f'rich_message:{message_id}')
             try:s.commit()
             except IntegrityError:
                 s.rollback();existing=s.get(Record,'outreach:'+key)
