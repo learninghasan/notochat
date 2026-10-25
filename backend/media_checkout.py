@@ -18,6 +18,8 @@ class DraftRequest(BaseModel):
 class ProposalLine(CartLine):
     expected_unit_price:int|None=Field(default=None,ge=0)
 class Proposal(BaseModel):
+    delivery_area:str=Field(default="",max_length=100)
+    delivery_slot:str=Field(default="",max_length=100)
     model_config=ConfigDict(extra='forbid')
     request_id:str=Field(min_length=8,max_length=100)
     items:list[ProposalLine]=Field(min_length=1,max_length=10)
@@ -108,10 +110,11 @@ def install_media_checkout(app,Record,Conversation,Message,Product,authorize,ses
             if pid in quotes and quotes[pid]!=p.price:raise HTTPException(409,'Catalog price changed; refresh before preparing the summary')
             lines.append({'product_id':pid,'name':p.name,'quantity':qty,'unit_price':p.price})
         code=secrets.token_hex(3).upper();expires=(datetime.now(timezone.utc)+timedelta(minutes=30)).isoformat()
+        app.state.validate_delivery(s,body.delivery_area,body.delivery_slot,body.delivery_charge,sum(x['quantity']*x['unit_price'] for x in lines))
         total=sum(x['quantity']*x['unit_price'] for x in lines)+body.delivery_charge
-        proposal={'conversation_id':cid,'items':lines,'customer':body.customer.strip(),'phone':body.phone.strip(),'address':body.address.strip(),'delivery_charge':body.delivery_charge,'total':total,'code':code,'status':'pending','expires_at':expires,'source_attachment_id':rid}
+        proposal={'conversation_id':cid,'items':lines,'customer':body.customer.strip(),'phone':body.phone.strip(),'address':body.address.strip(),'delivery_charge':body.delivery_charge,'delivery_area':body.delivery_area,'delivery_slot':body.delivery_slot,'total':total,'code':code,'status':'pending','expires_at':expires,'source_attachment_id':rid}
         put(s,'checkout',proposal,f'checkout:{cid}')
-        summary='Please verify these details / তথ্যগুলো মিলিয়ে দেখুন:\n'+'\n'.join(f"{x['name']} × {x['quantity']} · ৳{x['unit_price']}" for x in lines)+f"\n{proposal['customer']}\n{proposal['phone']}\n{proposal['address']}\nDelivery / ডেলিভারি ৳{body.delivery_charge} · Total / মোট ৳{total}\nCOD. Reply / লিখুন: CONFIRM {code}"
+        summary='Please verify these details / তথ্যগুলো মিলিয়ে দেখুন:\n'+'\n'.join(f"{x['name']} × {x['quantity']} · ৳{x['unit_price']}" for x in lines)+f"\n{proposal['customer']}\n{proposal['phone']}\n{proposal['address']}\nArea / এলাকা: {body.delivery_area or 'Customer-provided address'} · Slot / সময়: {body.delivery_slot or 'Not specified'}\nDelivery / ডেলিভারি ৳{body.delivery_charge} · Total / মোট ৳{total}\nCOD. Reply / লিখুন: CONFIRM {code}"
         message=Message(conversation_id=cid,role='team',text=summary);s.add(message);s.flush()
         d=put(s,'media_proposals',{**proposal,'fingerprint':fingerprint,'message_id':message.id,'order_created':False},key);s.commit();return d
 

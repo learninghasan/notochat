@@ -42,10 +42,14 @@ def install_widget(app,engine,Record,Conversation,Message,session,configuration=
         return r
 
     @app.get('/widget',response_class=HTMLResponse)
-    def widget():
+    def widget(s:Session=Depends(session)):
         enabled()
         origins=configuration().get('WIDGET_FRAME_ANCESTORS',"'self'")
-        return HTMLResponse(WIDGET_HTML,headers={'Content-Security-Policy':"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors "+origins,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'})
+        from html import escape
+        brand=app.state.branding(s)
+        logo=('<img alt="" width="32" height="32" src="'+escape(brand['logo_data_url'],quote=True)+'"> ') if brand['logo_data_url'] else ''
+        html=WIDGET_HTML.replace('NotoChat · Chat with us',escape(brand['name'])+' · Chat with us').replace('<strong>NotoChat</strong>',logo+'<strong>'+escape(brand['name'])+'</strong>').replace('Send a message to our team',escape(brand['widget_greeting'])).replace('#315cde',brand['primary_color']).replace('color:#dbe6ff','color:white')
+        return HTMLResponse(html,headers={'Content-Security-Policy':"default-src 'self'; img-src 'self' data:; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors "+origins,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'})
 
     @app.post('/widget/sessions')
     def start(body:Start,request:Request,s:Session=Depends(session)):

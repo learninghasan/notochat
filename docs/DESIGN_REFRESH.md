@@ -27,3 +27,10 @@ Responsive rules and JSX were reviewed, but visual QA is not claimed. Any
 AI-generated design preview must be labelled **design mockup, not implementation
 screenshot**. The deployed demo remains browser-local; this pass does not enable
 AI/providers, change tenant authentication, create secrets or provision databases.
+
+Latest user direction: GoDaddy-inspired clean style. Actually viewed Mobbin
+[GoDaddy conversations overview](https://mobbin.com/screens/cde6da18-2458-4ef9-8221-992bb995c84a)
+and [GoDaddy dashboard](https://mobbin.com/screens/1ce6e490-de61-4b64-b7ca-052607481327).
+Applied confident headings, pale navigation, restrained borders/no panel shadows,
+and a crisp primary overview action. Retained Gorgias/Plain inbox structure and
+tenant-configurable accent. No GoDaddy branding copied; no rendered visual QA claimed.

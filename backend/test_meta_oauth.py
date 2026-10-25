@@ -131,3 +131,41 @@ def test_multiple_pages_preserve_tokens_route_by_recipient_and_pause_independent
     # Paused page cannot receive new messages, while the other still can.
     newer=body.replace(b'same-message-id',b'new-message-id');headers['X-Hub-Signature-256']='sha256='+hmac.new(b'platform-secret',newer,hashlib.sha256).hexdigest()
     assert c.post('/webhooks/meta',content=newer,headers=headers).json()['stored']==1
+
+
+def test_explicit_trial_policy_once_per_workspace_and_rollback(configured,monkeypatch):
+    c,g,_=configured
+    monkeypatch.setenv('PAGE_CONNECT_TRIAL_PAISA','2500')
+    monkeypatch.setenv('PAGE_CONNECT_TRIAL_POLICY_ID','synthetic-offer-v1')
+    monkeypatch.setenv('PAGE_CONNECT_TRIAL_SCOPE','workspace')
+    connect(c)
+    assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'999999'}).status_code==404
+    assert call(c,'org_A','GET','/billing').json()['balance_paisa']==0
+    assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'12345'}).status_code==200
+    assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'12345'}).status_code==200
+    # Reauthorization and a changed offer must not mint repeated credit.
+    monkeypatch.setenv('PAGE_CONNECT_TRIAL_POLICY_ID','synthetic-offer-v2')
+    connect(c)
+    assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'12345'}).status_code==200
+    billing=call(c,'org_A','GET','/billing').json()
+    assert billing['balance_paisa']==2500
+    assert len([x for x in billing['ledger'] if x['type']=='page_connect_trial'])==1
+    assert call(c,'org_B','GET','/billing').json()['balance_paisa']==0
+    app=g.workspace('org_B')
+    with Session(app.state.engine) as s:
+        app.state.grant_page_trial(s,'synthetic-rollback')
+        s.rollback()
+    assert call(c,'org_B','GET','/billing').json()['balance_paisa']==0
+
+
+def test_trial_is_disabled_by_default_and_partial_policy_fails_closed(configured,monkeypatch):
+    c,g,_=configured
+    for key in ('PAGE_CONNECT_TRIAL_PAISA','PAGE_CONNECT_TRIAL_POLICY_ID','PAGE_CONNECT_TRIAL_SCOPE'):monkeypatch.delenv(key,raising=False)
+    connect(c)
+    assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'12345'}).status_code==200
+    assert call(c,'org_A','GET','/billing').json()['balance_paisa']==0
+    monkeypatch.setenv('PAGE_CONNECT_TRIAL_PAISA','500')
+    connect(c)
+    assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'12345'}).status_code==503
+    with Session(g.workspace('org_A').state.engine) as s:
+        assert s.get(Base.WorkspaceRecord,'billing:wallet').data['balance_paisa']==0

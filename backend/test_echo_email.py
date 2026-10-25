@@ -17,7 +17,7 @@ def test_credit_email_outbox_opt_in_mock_delivery_and_no_blind_retry(system,monk
     app,c,engine=system;c.put('/billing/notifications',headers=H,json={'enabled':True,'email':'owner@example.test'})
     with Session(engine) as s:app.state.queue_credit_email(s,'synthetic-crossing');app.state.queue_credit_email(s,'synthetic-crossing');s.commit()
     assert app.state.flush_credit_email()==0
-    for key,value in {'ENABLE_EMAIL_SEND':'1','SMTP_HOST':'smtp.example.test','SMTP_FROM':'no-reply@example.test','SMTP_USERNAME':'fake','SMTP_PASSWORD':'fake'}.items():monkeypatch.setenv(key,value)
+    for key,value in {'SMTP_SENDER_VERIFIED':'1','ENABLE_EMAIL_SEND':'1','SMTP_HOST':'smtp.example.test','SMTP_FROM':'no-reply@example.test','SMTP_USERNAME':'fake','SMTP_PASSWORD':'fake'}.items():monkeypatch.setenv(key,value)
     calls=[]
     class SMTP:
         def __init__(self,*a,**k):pass

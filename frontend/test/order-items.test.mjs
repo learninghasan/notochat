@@ -9,3 +9,12 @@ test('multi-product form keeps distinct quantities, merges duplicate products an
 test('invalid multi-product quantities and stale catalog selections are rejected before sending',()=>{
  for(const lines of [[],[[1,1.5]],[[1,0]],[[1,3],[1,3]],[[2,4]],[[99,1]]])assert.throws(()=>orderItems(form(lines),catalog));
 });
+
+test('tenant receipt text is escaped and remote logos are excluded',async()=>{
+ const {invoiceHtml}=await import('../lib/invoice.mjs');
+ const html=invoiceHtml({items:[],customer:'Sample',id:'demo',total:0},{name:'Peoniara <script>alert(1)</script>',receipt_footer:'Synthetic only',logo_data_url:'https://unverified.example/logo.svg'});
+ assert.ok(html.includes('Peoniara &lt;script&gt;'));
+ assert.ok(!html.includes('<script>alert(1)</script>'));
+ assert.ok(!html.includes('https://unverified.example'));
+ assert.ok(html.includes('Synthetic only'));
+});

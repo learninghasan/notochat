@@ -2,6 +2,31 @@
 
 Scope evidence: user “সবগুলোর … মেসেজ আসবে একটা প্ল্যাটফর্মে”, “এবং সেলস”, “ওটার মতো … প্রোডাক্ট বানাতে”, and “amader j example diyechi setar sob kichu poneby one implement koro”; reference https://www.aipraktor.com/ reviewed as a whole. GitHub publication and a usable Vercel URL are explicit acceptance criteria. This is the consolidated inventory, not a claim of unrestricted parity or production readiness. The bounded final implementation is documented in [FINAL_SCOPE_AND_OPERATIONS.md](FINAL_SCOPE_AND_OPERATIONS.md).
 
+## Current completion status (supersedes historical deployment notes)
+
+The Mobbin-inspired frontend demo is live at https://notochat-demo.onrender.com.
+It is browser-local, not a running production backend. The current code adds an
+explicitly configured, once-per-workspace verified Meta page-connect trial-credit
+hook and retry-safe ledger. No offer or monetary value is enabled by default.
+Service-fee calculation remains **unimplemented pending policy**: amount/rate,
+charging basis (usage, recharge, subscription or another basis), disclosure and
+refund treatment must be chosen before implementing a real monetary rule.
+WhatsApp QR/linked-device transport and its native dot takeover remain unimplemented
+pending transport/provider choice. These are genuine code gaps, not merely API keys.
+
+Other reduced capabilities remain intentional documented boundaries: reviewed
+media checkout, deterministic booking/date intake, three-frame/no-audio video,
+perceptual image matching, operator-provided delivery time, RATE-code ratings and
+separate gated tenant purge. Arbitrary video understanding, automatic ETA prediction,
+natural-language ratings and unconfirmed purchases are not added as new requirements.
+No claim of unrestricted reference parity or complete live readiness is made.
+
+Browser control remains unavailable. Read-only Render discovery found no PostgreSQL
+instances in the confirmed workspace. Backend activation requires approved durable
+PostgreSQL provisioning/access and application secrets; full account mode also needs
+auth database/migration and SMTP. Free web hosting does not run the continuous worker.
+MealOps resources must not be repurposed. Decisions and activation are still pending.
+
 **Done locally** means implemented and covered by local automated verification, not live-provider or browser verification. **Partial** means recoverable implementation remains; deployment access does not block it. **Blocked** identifies an actual external dependency or product decision. No customer sends, live charges or courier bookings are used as tests.
 
 | Original/reference capability | Status | Implementation and exact remaining boundary |
@@ -30,7 +55,7 @@ Scope evidence: user “সবগুলোর … মেসেজ আসবে �
 | Resumable guided onboarding, test then live | Done locally | Business profile/timezone, saved resume step, actual configuration checks and isolated version-preview evidence. Configured/tested is explicitly distinct from live verified. |
 | Encrypted credentials/backups, pause preserves data, deletion | Partial / hosting blocked | Encryption, encrypted backup/restore utilities and scheduler script exist. Durable offsite scheduler provisioning blocked. Owner-confirmed recoverable quarantine, offline gated tenant purge, device cleanup and schema baseline/drift checks implemented. Nightly archives are authenticated without plaintext. Actual production purge/auth-account/backups disposition and hosting installation remain separate authorized operations. |
 | No marketing trackers | Done locally | No marketing trackers introduced. Necessary authentication cookies remain; reference's literal “no cookies” cannot be applied to this auth design. |
-| GitHub source and usable Vercel deployment | Partial / access blocked | Main through bc664d2 passed remote CI (129 Python/18 JavaScript tests, build, PostgreSQL and HTTP stack); subsequent increment reports its own commit/CI in the checkpoint. Vercel team reads succeed but no projects exist; earlier write403 and current identity404 remain unresolved. No live URL. |
+| GitHub source and usable Vercel deployment | Partial / access blocked | Main through bc664d2 passed remote CI (129 Python/18 JavaScript tests, build, PostgreSQL and HTTP stack); subsequent increment reports its own commit/CI in the checkpoint. Vercel team reads succeed but no projects exist; earlier write403 and current identity404 remain unresolved. Vercel URL remains unverified; a separate Render browser-local demo is live. |
 
 ## Not separate original requirements
 
@@ -48,7 +73,7 @@ Chrome Web Store publication, branded server-generated/email invoices, arbitrary
 
 - Reporting: “Analytics অ্যানালিটিক্স AI কতটা সামলাল, টিম কত দ্রুত উত্তর দিল”. This authorizes observed handling/response-time reporting; it does not justify fabricated resolution statistics.
 - Follow-up: “মেটার ২৪ ঘণ্টার নিয়মের ভেতরেই সুন্দর করে একবার মনে করিয়ে দেয়। কাদের মনে করাবে — হট না ওয়ার্ম — সেটা আপনি বেছে নেন।” Configurable target temperatures and bounded one-time reminders directly implement this.
-- Shipment/review: “পার্সেল কুরিয়ারে দিলে, ডেলিভারির দিন সকালে — প্রতিটা আপডেট নিজে থেকেই চ্যাটে চলে যায়, ট্র্যাক করার বাটনসহ”; “ডেলিভারি → ধন্যবাদ → রিভিউ লিংক”. Only shipment/review source triggers are closed here; delivery-day prediction/buttons and separate rating intake are still partial.
+- Shipment/review: “পার্সেল কুরিয়ারে দিলে, ডেলিভারির দিন সকালে — প্রতিটা আপডেট নিজে থেকেই চ্যাটে চলে যায়, ট্র্যাক করার বাটনসহ”; “ডেলিভারি → ধন্যবাদ → রিভিউ লিংক”. Shipment/review triggers, operator-timed delivery notifications, supported tracking links and RATE-code intake are implemented. Automatic ETA prediction is not claimed.
 - Booking: reference advertises service-business booking intake, configurable questions, request → owner confirmation and reminders. The implementation uses deterministic questions and explicit timezone input rather than claiming model date understanding.
 
 ## Seven-group closure and remaining prerequisites
@@ -69,8 +94,8 @@ User reports Vercel import/deployment is already done. Current connector still f
 
 User selected free Render testing hosting. `render.yaml` and
 `docs/RENDER_FREE_SETUP.md` define one free Docker API, no worker or database
-provisioning. Deployment remains pending account access and approved durable
-PostgreSQL/secrets; no public Render URL is verified. Existing Vercel browser-local
+provisioning. API deployment remains pending approved durable PostgreSQL/secrets; the separate
+frontend demo is live as recorded below. Existing Vercel browser-local
 demo and a backend-connected demo are distinct. Production/live-provider rows
 above remain unverified; this configuration does not provide continuous jobs.
 
@@ -79,3 +104,13 @@ verified at https://notochat-demo.onrender.com (Render live commit `6bf2076`).
 The API Blueprint remains prepared but unapplied, pending durable PostgreSQL and
 approved secrets. No continuous worker or live integrations. Full details and
 verification limits: `docs/RENDER_FREE_SETUP.md`.
+
+## Explicit scope additions: white-label + Peoniara + five improvements
+
+User approved white-label architecture, Peoniara first pilot and the five previously
+proposed improvements. Bounded implementation and exact activation/quality limits:
+[WHITE_LABEL_PILOT.md](WHITE_LABEL_PILOT.md). Tenant branding, safe widget-host mapping,
+source corrections, approval proposals, customer/reorder drafts, delivery rules and
+observed sales/cost reporting are implemented. Synthetic Peoniara demo is separate
+from actual store data. Domain/sender/backend/provider activation remains pending;
+no reseller hierarchy, unapproved prices or extra proposed features were added.

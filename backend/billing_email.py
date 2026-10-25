@@ -22,7 +22,7 @@ def install_email(app,engine,Record,authorize,session,put):
         settings=s.get(Record,'billing:email');rid='billing_email:'+key
         if settings and settings.data.get('enabled') and settings.data.get('email') and not s.get(Record,rid):put(s,'billing_email',{'status':'pending','created_at':datetime.now(timezone.utc).isoformat()},rid)
     def flush():
-        if os.getenv('ENABLE_EMAIL_SEND')!='1' or not (os.getenv('SMTP_USERNAME') or os.getenv('SMTP_USER')) or not all(os.getenv(k) for k in ('SMTP_HOST','SMTP_FROM','SMTP_PASSWORD')):return 0
+        if os.getenv('SMTP_SENDER_VERIFIED')!='1' or os.getenv('ENABLE_EMAIL_SEND')!='1' or not (os.getenv('SMTP_USERNAME') or os.getenv('SMTP_USER')) or not all(os.getenv(k) for k in ('SMTP_HOST','SMTP_FROM','SMTP_PASSWORD')):return 0
         count=0
         with Session(engine) as s:
             for r in s.scalars(select(Record).where(Record.kind=='billing_email',Record.data['status'].as_string()=='pending').limit(10)):
@@ -31,7 +31,7 @@ def install_email(app,engine,Record,authorize,session,put):
                 claimed=s.execute(update(Record).where(Record.id==r.id,Record.data['status'].as_string()=='pending').values(data={**r.data,'status':'attempting'}));s.commit()
                 if claimed.rowcount!=1:continue
                 try:
-                    message=EmailMessage();message['From']=os.environ['SMTP_FROM'];message['To']=config.data['email'];message['Subject']='NotoChat AI credit is low';message.set_content('Your NotoChat workspace AI credit is low. Sign in to review billing and recharge. No customer data is included in this email.')
+                    message=EmailMessage();message['From']=os.environ['SMTP_FROM'];message['To']=config.data['email'];brand=app.state.branding(s)['name'];message['Subject']=brand+' AI credit is low';message.set_content('Your '+brand+' workspace AI credit is low. Sign in to review billing and recharge. No customer data is included in this email.')
                     with smtplib.SMTP(os.environ['SMTP_HOST'],int(os.getenv('SMTP_PORT','587')),timeout=15) as client:
                         client.starttls(context=ssl.create_default_context());client.login(os.getenv('SMTP_USERNAME') or os.environ['SMTP_USER'],os.environ['SMTP_PASSWORD']);client.send_message(message)
                     r.data={**r.data,'status':'sent'};count+=1

@@ -106,5 +106,7 @@ def install_meta_oauth(app,Record,authorize,session):
         d.update(META_PAGES=connected,META_APP_SECRET=cfg['META_OAUTH_APP_SECRET'],META_VERIFY_TOKEN=cfg['META_OAUTH_VERIFY_TOKEN'],META_GRAPH_VERSION=cfg['META_OAUTH_GRAPH_VERSION'],META_PAGE_ID=body.page_id,META_PAGE_ACCESS_TOKEN=page['access_token'],INSTAGRAM_ACCOUNT_ID=ig,INSTAGRAM_ACCESS_TOKEN=page['access_token'] if ig else '',ENABLE_LIVE_SEND='0')
         save(s,'connections:private','private_credentials',{'ciphertext':cipher().encrypt(json.dumps(d).encode()).decode()})
         candidate=s.get(Record,'oauth-pages:'+p['user_id']);s.refresh(candidate)
-        candidate.data={**candidate.data,'selected_ids':list(set(candidate.data.get('selected_ids',[])+[body.page_id]))};s.commit()
+        candidate.data={**candidate.data,'selected_ids':list(set(candidate.data.get('selected_ids',[])+[body.page_id]))}
+        app.state.grant_page_trial(s,body.page_id)
+        s.commit()
         return {'connected':True,'page_id':body.page_id,'instagram_account_id':ig,'live_send':False,'note':'Verify inbound webhooks before explicitly enabling live sending in connection settings.'}

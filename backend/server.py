@@ -140,6 +140,14 @@ class BusinessGateway:
         if scope['path']=='/webhooks/meta' and os.getenv('META_OAUTH_APP_SECRET'):return await self.meta_webhook(scope,receive,send)
         request=Request(scope,receive=receive)
         headers=request.headers
+        from domain_mapping import organization_for_host
+        try:domain_org=organization_for_host(headers.get('host',''))
+        except (ValueError,TypeError):return await JSONResponse({'detail':'Domain routing is not configured correctly'},status_code=503)(scope,receive,send)
+        if domain_org:
+            if scope['path'].startswith('/widget'):
+                scope={**scope,'path':'/business/'+domain_org+scope['path'],'raw_path':('/business/'+domain_org+scope['path']).encode()}
+            elif scope['path'].startswith('/business/') and not scope['path'].startswith('/business/'+domain_org+'/'):
+                return await JSONResponse({'detail':'Domain does not belong to this business'},status_code=404)(scope,receive,send)
         public=re.fullmatch(r'/business/([A-Za-z0-9_-]{1,200})(/webhooks/(?:meta|courier)|/widget(?:/sessions|/messages)?|/payments/(?:ipn|return))',scope['path'])
         if public:
             organization_id,child_path=public.groups()
@@ -150,6 +158,7 @@ class BusinessGateway:
             child_scope={**scope,'path':child_path,'raw_path':child_path.encode()}
             return await child(child_scope,receive,send)
         if not headers.get('x-notochat-identity'):
+            if domain_org and scope['path']!='/health':return await JSONResponse({'detail':'Verified business identity required'},status_code=401)(scope,receive,send)
             # Legacy access remains separate; cookies alone never grant access here.
             return await self.legacy(scope,receive,send)
         body=await request.body()
@@ -157,6 +166,7 @@ class BusinessGateway:
         path=scope['path']+('?' + scope['query_string'].decode() if scope.get('query_string') else '')
         try:
             principal=await asyncio.to_thread(self.verify,headers,scope['method'],path,body)
+            if domain_org and principal['organization_id']!=domain_org:raise PermissionError('Business identity does not match domain')
             child=await asyncio.to_thread(self.workspace,principal['organization_id'])
         except PermissionError as e:return await JSONResponse({'detail':str(e)},status_code=401)(scope,receive,send)
         except ValueError as e:return await JSONResponse({'detail':str(e)},status_code=503)(scope,receive,send)

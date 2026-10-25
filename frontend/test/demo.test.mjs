@@ -1,7 +1,7 @@
 import {test,beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-const {demoApi:api}=await import('data:text/javascript;base64,'+Buffer.from(fs.readFileSync(new URL('../app/demo.js',import.meta.url),'utf8')).toString('base64'));
+const {demoApi:api}=await import(new URL('../app/demo.js',import.meta.url));
 const store=new Map();
 beforeEach(()=>{store.clear();globalThis.localStorage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)}});
 const post=(p,b)=>api(p,{method:'POST',body:JSON.stringify(b)});
@@ -76,4 +76,19 @@ test('stale multi-product quotes fail without partial stock reservation in demo'
  await assert.rejects(()=>post('/orders',body),/Price changed/);
  assert.equal((await api('/catalog'))[0].stock,12);
  assert.equal((await api('/workspace')).orders.length,0);
+});
+
+test('Peoniara synthetic brand, reviews and delivery-aware reorder preserve boundaries',async()=>{
+ assert.match((await api('/branding')).name,/Peoniara/);
+ const proposal=await post('/approvals',{request_id:'demo-review',conversation_id:1,kind:'refund',detail:'Synthetic request'});
+ const decision={decision:'approved',expected_source_hash:proposal.source_hash,note:'Proposal only'};
+ assert.equal((await post('/approvals/'+proposal.id+'/decision',decision)).execution,'none');
+ assert.equal((await post('/approvals/'+proposal.id+'/decision',decision)).status,'approved');
+ await api('/delivery/rules',{method:'PUT',body:JSON.stringify({enabled:true,areas:[{name:'Synthetic area',fee:70,minimum:100,slots:['Synthetic slot']}]})});
+ await assert.rejects(()=>post('/orders',order()),/Delivery/);
+ const body={...order(),delivery_area:'Synthetic area',delivery_slot:'Synthetic slot'};
+ const o=await post('/orders',body);const draft=await post('/orders/'+o.id+'/reorder-draft',{request_id:'reorder-demo'});
+ assert.equal(draft.order_created,false);assert.equal(draft.requires_customer_confirmation,true);
+ assert.equal((await api('/customers/1/profile')).orders.length,1);
+ assert.equal((await api('/commerce/report')).actual_ai_cost_paisa,0);
 });

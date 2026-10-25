@@ -32,6 +32,31 @@ def install_billing(app,engine,Record,authorize,session,put,notify,records):
         return r
     with Session(engine) as s:wallet(s);s.commit()
 
+    def trial_policy():
+        # No implied monetary offer: operator must explicitly select all terms.
+        amount=os.getenv('PAGE_CONNECT_TRIAL_PAISA','')
+        policy=os.getenv('PAGE_CONNECT_TRIAL_POLICY_ID','')
+        scope=os.getenv('PAGE_CONNECT_TRIAL_SCOPE','')
+        if not amount and not policy and not scope:return None
+        if not amount.isascii() or not amount.isdigit() or not 0<int(amount)<=5_000_000 or not policy or len(policy)>100 or scope!='workspace':
+            raise HTTPException(503,'Page-connect trial policy requires an explicit positive paisa amount, policy ID and workspace scope')
+        return {'amount_paisa':int(amount),'policy_id':policy,'scope':scope}
+
+    def grant_page_trial(s,page_id):
+        # Called only after authenticated Meta subscription succeeds. Wallet row
+        # serializes retries/concurrent connections, together with the ledger write.
+        w=wallet(s)
+        rid='ledger:page-connect-trial'
+        prior=s.get(Record,rid)
+        if prior:return {'granted':False,'already_granted':True}
+        policy=trial_policy()
+        if not policy:return {'granted':False,'configured':False}
+        w.data={**w.data,'balance_paisa':w.data['balance_paisa']+policy['amount_paisa']}
+        put(s,'ledger',{'type':'page_connect_trial','paisa':policy['amount_paisa'],'policy_id':policy['policy_id'],'scope':policy['scope'],'page_id':page_id,'created_at':datetime.now(timezone.utc).isoformat()},rid)
+        return {'granted':True,**policy}
+
+    app.state.grant_page_trial=grant_page_trial
+
     def require_credit(s,action='text'):
         if not enabled():return
         if action=='audio':
@@ -50,6 +75,7 @@ def install_billing(app,engine,Record,authorize,session,put,notify,records):
     def charge(s,usage):
         if not enabled():return
         rid='ledger:usage:'+hashlib.sha256(usage['id'].encode()).hexdigest()
+        w=wallet(s)  # Serialize before checking idempotency, including concurrent retries.
         if s.get(Record,rid):return
         if usage.get('action')=='audio':
             try:
@@ -71,7 +97,7 @@ def install_billing(app,engine,Record,authorize,session,put,notify,records):
 
     def snapshot(s):
         w=wallet(s)
-        return {'currency':'BDT','balance':w.data['balance_paisa']/100,'balance_paisa':w.data['balance_paisa'],'sandbox_balance':w.data.get('sandbox_balance_paisa',0)/100,'metering_enabled':enabled(),'payments_connected':bool(os.getenv('SSLCOMMERZ_STORE_ID') and os.getenv('SSLCOMMERZ_STORE_PASSWORD')),'sandbox':os.getenv('SSLCOMMERZ_LIVE')!='1','usage':records(s,'usage'),'ledger':records(s,'ledger'),'pricing':{'audio_paisa_per_minute':os.getenv('AI_AUDIO_PAISA_PER_MINUTE'),'input_paisa_per_million':os.getenv('AI_INPUT_PAISA_PER_MILLION'),'output_paisa_per_million':os.getenv('AI_OUTPUT_PAISA_PER_MILLION')},'note':'Recharge credits are posted only after server-to-server validation. Sandbox payments are test credits. Usage metering is '+('enabled at the displayed operator-configured rates.' if enabled() else 'disabled; no AI credit deductions are applied.')}
+        return {'currency':'BDT','balance':w.data['balance_paisa']/100,'balance_paisa':w.data['balance_paisa'],'sandbox_balance':w.data.get('sandbox_balance_paisa',0)/100,'metering_enabled':enabled(),'payments_connected':bool(os.getenv('SSLCOMMERZ_STORE_ID') and os.getenv('SSLCOMMERZ_STORE_PASSWORD')),'sandbox':os.getenv('SSLCOMMERZ_LIVE')!='1','usage':records(s,'usage'),'ledger':records(s,'ledger'),'trial_policy':trial_policy(),'pricing':{'audio_paisa_per_minute':os.getenv('AI_AUDIO_PAISA_PER_MINUTE'),'input_paisa_per_million':os.getenv('AI_INPUT_PAISA_PER_MILLION'),'output_paisa_per_million':os.getenv('AI_OUTPUT_PAISA_PER_MILLION')},'note':'Recharge credits are posted only after server-to-server validation. Sandbox payments are test credits. Usage metering is '+('enabled at the displayed operator-configured rates.' if enabled() else 'disabled; no AI credit deductions are applied.')}
     app.state.require_credit=require_credit;app.state.charge_usage=charge;app.state.billing_snapshot=snapshot
 
     @app.post('/billing/recharge',dependencies=[Depends(authorize)])

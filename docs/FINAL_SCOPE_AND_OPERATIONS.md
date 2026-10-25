@@ -22,3 +22,29 @@ The nightly backup script now authenticates the completed archive without writin
 - Supported browser-control tools are not exposed in this task. No browser, Chrome extension or PWA-device verification is claimed.
 - Hosted backend/worker/database, SMTP/VAPID and approved Meta/AI/courier/payment configuration remain necessary. No real message, email, payment, booking or deletion has been used as a test.
 - Decisions still pending: official WhatsApp API versus reference QR transport; trial credit/service-fee policy. Existing defaults remain unchanged.
+
+## Remaining-work closure: explicit offer hook
+
+`PAGE_CONNECT_TRIAL_PAISA`, `PAGE_CONNECT_TRIAL_POLICY_ID` and
+`PAGE_CONNECT_TRIAL_SCOPE=workspace` jointly configure an optional trial offer.
+All are unset by default. The amount is integer paisa; no public endpoint grants
+credits. A successful authenticated Meta page subscription posts one tenant-scoped
+ledger entry and wallet credit in the same transaction as connection persistence.
+Concurrent connections, reconnects and changed policy IDs do not grant it twice.
+Rollback leaves no credit. Existing connections do not receive a retroactive
+background grant; a future successful connection is the eligible event if policy
+is activated. The operator must approve the amount, scope and eligibility before
+activation. The public billing response/UI discloses configured terms.
+
+Usage ledger retries now acquire the wallet lock before the idempotency check,
+preventing simultaneous repeated usage from charging twice on PostgreSQL.
+Synthetic integration, rollback, tenant-isolation and real PostgreSQL concurrency
+checks cover this behavior; no real monetary grant or provider connection occurred.
+
+Service-fee economics remain a real code/policy blocker, not an unset numeric field:
+choose fee basis, rate/amount, disclosure and refund behavior. WhatsApp QR transport
+is also a real code/provider-choice blocker. Other bounded capabilities above are
+not promoted to unsupported autonomous behavior. Render read-only discovery found
+no PostgreSQL instances; database/secret provisioning requires approval. No paid or
+expiring database has been created. Browser/extension/mobile visual QA remains blocked
+by absent supported browser tools. See the matrix's current-status section.

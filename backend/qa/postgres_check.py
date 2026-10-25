@@ -176,3 +176,20 @@ with ThreadPoolExecutor(max_workers=2) as pool:booking_retries=list(pool.map(lam
 assert all(r.status_code==200 for r in booking_retries),[r.text for r in booking_retries]
 assert booking_retries[0].json()['id']==booking_retries[1].json()['id']
 print('PASS: PostgreSQL concurrent booking-intake request retries reserve one slot')
+
+# A concurrent page-connect offer is credited once; repeated usage is charged once.
+os.environ.update(PAGE_CONNECT_TRIAL_PAISA='2500',PAGE_CONNECT_TRIAL_POLICY_ID='disposable-qa-offer',PAGE_CONNECT_TRIAL_SCOPE='workspace')
+with Session(business_app.state.engine) as s:before=s.get(Record,'billing:wallet').data['balance_paisa']
+def grant_trial(_):
+    with Session(business_app.state.engine) as s:
+        result=business_app.state.grant_page_trial(s,'synthetic-page');s.commit();return result
+with ThreadPoolExecutor(max_workers=2) as pool:grants=list(pool.map(grant_trial,range(2)))
+assert sum(bool(g.get('granted')) for g in grants)==1
+with Session(business_app.state.engine) as s:assert s.get(Record,'billing:wallet').data['balance_paisa']==before+2500
+os.environ.update(AI_BILLING_ENABLED='1',AI_INPUT_PAISA_PER_MILLION='1000000',AI_OUTPUT_PAISA_PER_MILLION='1000000')
+def same_usage(_):
+    with Session(business_app.state.engine) as s:
+        business_app.state.charge_usage(s,{'id':'concurrent-usage-'+prefix,'tokens':{'input_tokens':1,'output_tokens':1}});s.commit()
+with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(same_usage,range(2)))
+with Session(business_app.state.engine) as s:assert s.get(Record,'billing:wallet').data['balance_paisa']==before+2498
+print('PASS: PostgreSQL concurrent trial grant and repeated usage each post one ledger entry')

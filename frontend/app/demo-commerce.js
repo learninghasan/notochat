@@ -1,0 +1,21 @@
+// Browser-only simulations: no provider, payment or customer action.
+export function demoCommerce(s,path,method,body,save,check){
+ const docs=()=>s.knowledge.map(d=>({...d,source_hash:JSON.stringify([d.title,d.text])}));
+ const source=cid=>JSON.stringify([s.messages[cid]?.filter(m=>m.role==='customer'),s.products,s.agent,s.knowledge]);
+ s.approvals??=[];s.reorder_drafts??=[];s.delivery_rules??={enabled:false,areas:[]};
+ if(path==='/knowledge/provenance')return docs();
+ let m=path.match(/^\/knowledge\/(.+)\/correction$/);
+ if(m&&method==='PUT'){const d=s.knowledge.find(d=>d.id===m[1]);check(d,'Document not found');check(JSON.stringify([d.title,d.text])===body.expected_hash,'Source changed; reload');check(body.title?.trim()&&body.text?.trim()&&body.source_note?.trim(),'Title, content and source note required');s.knowledge_revisions??=[];s.knowledge_revisions.push({...d});Object.assign(d,{title:body.title,text:body.text,source_note:body.source_note});save(s);return docs().find(x=>x.id===d.id);}
+ if(path==='/approvals'&&method==='GET')return s.approvals;
+ if(path==='/approvals'&&method==='POST'){const id='approval:'+body.request_id;const old=s.approvals.find(a=>a.id===id);if(old){check(['conversation_id','kind','detail'].every(k=>old[k]===body[k]),'Request ID reused');return old}const c=s.conversations.find(c=>c.id===body.conversation_id);check(c&&body.detail?.trim(),'Customer and proposal required');const a={...body,id,status:'pending',source_hash:source(c.id),execution:'none'};c.mode='human';s.approvals.push(a);save(s);return a;}
+ m=path.match(/^\/approvals\/(.+)\/decision$/);
+ if(m&&method==='POST'){const a=s.approvals.find(a=>a.id===m[1]);check(a,'Proposal not found');if(a.status!=='pending'){check(a.status===body.decision&&a.decision_note===body.note,'Already decided');return a}check(a.source_hash===body.expected_source_hash&&a.source_hash===source(a.conversation_id),'Source changed; create a new proposal');check(['approved','rejected'].includes(body.decision)&&body.note?.trim(),'Decision and note required');Object.assign(a,{status:body.decision,decision_note:body.note});save(s);return a;}
+ m=path.match(/^\/customers\/(\d+)\/profile$/);
+ if(m){const c=s.conversations.find(c=>c.id===+m[1]);check(c,'Customer not found');return {name:c.customer,orders:s.orders.filter(o=>o.conversation_id===c.id),sensitive_profile_collected:false};}
+ m=path.match(/^\/orders\/(.+)\/reorder-draft$/);
+ if(m&&method==='POST'){const o=s.orders.find(o=>o.id===m[1]);check(o,'Order not found');const id='reorder:'+body.request_id;const old=s.reorder_drafts.find(d=>d.id===id);if(old){check(old.source_order_id===o.id,'Request ID reused');return old}const changes=[];let available=true;const items=o.items.map(i=>{const p=s.products.find(p=>p.id===i.product_id);if(!p||p.stock<i.quantity){available=false;changes.push('Unavailable: '+i.name)}if(p&&p.price!==i.unit_price)changes.push('Price changed: '+i.name);return {product_id:i.product_id,quantity:i.quantity,expected_unit_price:p?.price??null}});const d={id,source_order_id:o.id,conversation_id:o.conversation_id,customer:o.customer,phone:o.phone,address:o.address,items,changes,available,requires_customer_confirmation:true,order_created:false};s.reorder_drafts.push(d);save(s);return d;}
+ if(path==='/delivery/rules'&&method==='GET')return s.delivery_rules;
+ if(path==='/delivery/rules'&&method==='PUT'){check(Array.isArray(body.areas)&&body.areas.length<=100&&(!body.enabled||body.areas.length),'Provide delivery areas');check(body.areas.every(a=>a.name?.trim()&&Number.isInteger(a.fee)&&a.fee>=0&&Number.isInteger(a.minimum)&&a.minimum>=0&&Array.isArray(a.slots)),'Invalid area, fee, minimum or slots');check(new Set(body.areas.map(a=>a.name.trim().toLowerCase())).size===body.areas.length,'Duplicate areas');s.delivery_rules=body;save(s);return body;}
+ if(path==='/commerce/report')return {confirmed_order_value_bdt:s.orders.filter(o=>o.status!=='cancelled').reduce((v,o)=>v+o.total,0),actual_ai_cost_paisa:0,unmetered_requests:0,observed_stages:{conversations:s.conversations.length,reorder_drafts:s.reorder_drafts.length,orders:s.orders.length,pending_approvals:s.approvals.filter(a=>a.status==='pending').length},note:'Synthetic browser-only counts. No real AI usage, payment revenue or reliable abandonment rate.'};
+ return undefined;
+}

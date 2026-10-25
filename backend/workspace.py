@@ -52,6 +52,8 @@ class OrderItem(BaseModel):
 
 
 class OrderInput(BaseModel):
+    delivery_area: str = Field(default="",max_length=100)
+    delivery_slot: str = Field(default="",max_length=100)
     conversation_id: int
     customer: str = Field(min_length=1, max_length=160)
     phone: str = Field(min_length=5, max_length=40)
@@ -122,8 +124,8 @@ class AgentInput(BaseModel):
     language: Literal["Bangla", "English", "Auto"] = "Auto"
     tone: Literal["Friendly", "Professional", "Concise"] = "Friendly"
     instructions: str = Field(default="", max_length=10000)
-    delivery_inside: int = Field(default=70, ge=0, le=100000)
-    delivery_outside: int = Field(default=130, ge=0, le=100000)
+    delivery_inside: int | None = Field(default=None, ge=0, le=100000)
+    delivery_outside: int | None = Field(default=None, ge=0, le=100000)
     delivery_policy: str = Field(default="", max_length=2000)
     return_policy: str = Field(default="", max_length=4000)
     review_url: str = Field(default="", max_length=2000)
@@ -313,6 +315,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
 
     @app.post("/orders", dependencies=protected)
     def create_order(body:OrderInput,s:Session=Depends(session)):
+        s.scalar(select(Record).where(Record.id=="agent:live").with_for_update())
         conv(s,body.conversation_id)
         # A locked request record serializes retries on PostgreSQL. A unique key handles races.
         rid="orders:"+body.request_id
@@ -340,6 +343,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
             if pid in expected_prices and p.price!=expected_prices[pid]:raise HTTPException(409,"Price changed; request a new checkout summary")
             if p.stock < qty: raise HTTPException(409,f"Insufficient stock: {p.name}")
             items.append({"product_id":pid,"name":p.name,"quantity":qty,"unit_price":p.price})
+        app.state.validate_delivery(s,body.delivery_area,body.delivery_slot,body.delivery_charge,sum(i["quantity"]*i["unit_price"] for i in items))
         try:
             for i in items:
                 r=s.execute(update(Product).where(Product.id==i["product_id"],Product.stock>=i["quantity"]).values(stock=Product.stock-i["quantity"]))
@@ -383,7 +387,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     def receipt(rid:str,s:Session=Depends(session)):
         r=get(s,rid)
         if r.kind!="orders":raise HTTPException(404,"Order not found")
-        return {"business":"NotoChat workspace","currency":"BDT","receipt":r.data,"payment_verified":False}
+        return {"business":app.state.branding(s)["name"],"currency":"BDT","receipt":r.data,"payment_verified":False}
 
     @app.post("/leads", dependencies=protected)
     def lead(body:LeadInput,s:Session=Depends(session)):
@@ -620,6 +624,10 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     from access import install_access
     install_access(app,Record,Conversation,Message,authorize,session,put,tenant)
 
+    from branding import install_branding
+    install_branding(app,Record,authorize,session,put)
+    from commerce_review import install_reviews
+    install_reviews(app,Record,Product,Conversation,Message,authorize,session,put,records,catalog)
     from billing import install_billing
     install_billing(app,engine,Record,authorize,session,put,notify,records)
 

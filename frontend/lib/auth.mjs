@@ -27,7 +27,7 @@ export async function getAuth(){
   const sqliteModule='node:sqlite';const {DatabaseSync}=await import(/* webpackIgnore: true */ sqliteModule);database=new DatabaseSync(process.env.AUTH_SQLITE_PATH);
  }else throw Error('Configure a durable AUTH_DATABASE_URL for accounts');
  const mailConfigured=Boolean(process.env.SMTP_HOST&&process.env.SMTP_FROM);
- if(process.env.NODE_ENV==='production'&&!mailConfigured)throw Error('SMTP_HOST and SMTP_FROM are required for verified signup and invitations');
+ if(process.env.NODE_ENV==='production'&&(!mailConfigured||process.env.SMTP_SENDER_VERIFIED!=='1'))throw Error('Verified SMTP sender, SMTP_HOST and SMTP_FROM are required for verified signup and invitations');
  const transporter=mailConfigured?nodemailer.createTransport({host:process.env.SMTP_HOST,port:Number(process.env.SMTP_PORT||587),secure:process.env.SMTP_SECURE==='1',auth:process.env.SMTP_USER?{user:process.env.SMTP_USER,pass:process.env.SMTP_PASSWORD}:undefined}):null;
  instance=makeAuth({database,secret,baseURL,onOrganizationRemoval:quarantineOrganizationDevices,onMemberRemoval:revokeMemberDevices,onMemberAdded:data=>revokeMemberDevices(data,true),requireVerification:mailConfigured||process.env.NODE_ENV==='production',sendMail:async data=>{if(!transporter)throw Error('Email delivery is not configured');await transporter.sendMail({...data,from:process.env.SMTP_FROM})}});
  return instance;

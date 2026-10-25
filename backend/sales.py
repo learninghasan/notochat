@@ -65,10 +65,15 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
         def handover(reason):
             c.mode='human';meta.data={**meta.data,'reason':reason,'assignee':'','handover_until':''}
             notify(s,'Sales agent needs your team',reason,cid)
+            app.state.queue_approval(s,c.id,'refund' if 'refund' in reason.lower() else 'policy_exception' if 'policy' in reason.lower() else 'unclear_order',reason,'message-'+str(m.id))
             return say('আপনার বিষয়টি আমাদের টিমকে জানাচ্ছি। একজন সহকর্মী এই কথোপকথনটি দেখবেন।','I am passing this to our team so a colleague can help you.')
         checkout=s.scalar(select(Record).where(Record.id==f'checkout:{cid}').with_for_update())
         confirm=norm(m.text)
-        if any(word in confirm for word in ['refund','complaint','ফেরত চাই','অভিযোগ','টাকা ফেরত']):
+        if any(word in confirm for word in ['pregnant','eczema','diagnos','treatment','sensitive skin','skin allergy','গর্ভবতী','অ্যালার্জি','চিকিৎসা']):
+            text=handover('Product suitability or health concern requires human review; no diagnosis or treatment advice')
+        elif any(word in confirm for word in ['discount','ছাড় চাই','কম হবে']):
+            text=handover('Discount policy exception requires team approval')
+        elif any(word in confirm for word in ['refund','complaint','ফেরত চাই','অভিযোগ','টাকা ফেরত']):
             text=handover('Customer complaint or refund request')
         elif checkout and confirm in ('confirm '+checkout.data['code'].lower(),'কনফার্ম '+checkout.data['code'].lower()):
             p=checkout.data
@@ -85,7 +90,7 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
                 # Preserve already-issued single-item summaries across deployment.
                 lines=p.get('items') or [{'product_id':p['product_id'],'quantity':p['quantity'],'unit_price':p['unit_price']}]
                 try:
-                    order=create_order(OrderInput(conversation_id=cid,customer=p['customer'],phone=p['phone'],address=p['address'],items=[{'product_id':line['product_id'],'quantity':line['quantity'],'expected_unit_price':line['unit_price']} for line in lines],delivery_charge=p['delivery_charge'],payment_method='COD',request_id=request_id),s)
+                    order=create_order(OrderInput(conversation_id=cid,customer=p['customer'],phone=p['phone'],address=p['address'],items=[{'product_id':line['product_id'],'quantity':line['quantity'],'expected_unit_price':line['unit_price']} for line in lines],delivery_charge=p['delivery_charge'],delivery_area=p.get('delivery_area',''),delivery_slot=p.get('delivery_slot',''),payment_method='COD',request_id=request_id),s)
                 except HTTPException as error:
                     if error.status_code not in (404,409):raise
                     s.rollback();c=s.get(Conversation,cid);meta=s.get(Record,f'conversation:{cid}');checkout=s.get(Record,f'checkout:{cid}')
@@ -130,7 +135,11 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
                 shown=selected or products[:3]
                 text='\n\n'.join(f"{p['name']} · {p.get('size','')}\n৳{p['price']} · {p['stock']} "+say('টি স্টকে','in stock') for p in shown) if shown else say('এখনো ক্যাটালগে পণ্য যোগ করা হয়নি। টিমকে জানাচ্ছি।','Our catalog is not available yet. Our team can help.')
                 text+='\n\n'+say('কোনটি পছন্দ হয়েছে?','Which one would you like?')
-            elif intent.intent=='delivery':text=say('ডেলিভারি চার্জ: ঢাকার ভিতরে ৳','Delivery charge: inside Dhaka BDT ')+str(live['delivery_inside'])+say(', বাইরে ৳',', outside Dhaka BDT ')+str(live['delivery_outside'])+'. '+live.get('delivery_policy','')
+            elif intent.intent=='delivery':
+                rules=s.get(Record,'delivery:rules')
+                if rules and rules.data.get('enabled'):text='\n'.join(a['name']+': BDT '+str(a['fee'])+' · minimum BDT '+str(a['minimum'])+' · '+', '.join(a['slots']) for a in rules.data['areas'])
+                elif live.get('delivery_inside') is None or live.get('delivery_outside') is None:text=handover('Delivery pricing policy is not configured')
+                else:text=say('ডেলিভারি চার্জ: ভিতরে ৳','Delivery charge: local BDT ')+str(live['delivery_inside'])+say(', বাইরে ৳',', outside BDT ')+str(live['delivery_outside'])+'. '+live.get('delivery_policy','')
             elif intent.intent=='returns':text=live.get('return_policy') or handover('Return policy is not configured')
             elif intent.intent=='order':
                 source=norm(' '.join(history));details=all(norm(v) and norm(v) in source for v in [intent.customer,intent.phone,intent.address])
@@ -138,6 +147,7 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
                 for item in intent.items:quantities[item.product_id]=quantities.get(item.product_id,0)+item.quantity
                 by_id={p['id']:p for p in products}
                 if any(pid not in by_id for pid in quantities):text=handover('AI selected an unknown checkout item')
+                elif (s.get(Record,'delivery:rules') and s.get(Record,'delivery:rules').data.get('enabled')) or live.get('delivery_outside') is None:text=handover('Delivery area, fee and slot require a reviewed checkout quote')
                 elif not quantities or not details:text=say('অর্ডারের জন্য পণ্য/সাইজ ও প্রতিটির পরিমাণ, আপনার নাম, ফোন নম্বর ও পুরো ঠিকানা দিন।','Please share each product/size and quantity, your name, phone number and full delivery address.')
                 elif len(intent.phone)<5 or len(intent.address)<5:text=say('সঠিক ফোন নম্বর ও সম্পূর্ণ ঠিকানাটি আবার দেবেন?','Please provide a valid phone number and full address.')
                 elif any(qty>100 or by_id[pid]['stock']<qty for pid,qty in quantities.items()):text=handover('Requested quantity is not available or exceeds the checkout limit')
