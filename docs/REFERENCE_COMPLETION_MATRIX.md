@@ -73,3 +73,9 @@ provisioning. Deployment remains pending account access and approved durable
 PostgreSQL/secrets; no public Render URL is verified. Existing Vercel browser-local
 demo and a backend-connected demo are distinct. Production/live-provider rows
 above remain unverified; this configuration does not provide continuous jobs.
+
+Update 2026-10-25: separate **frontend browser-local demo** deployed and HTTP/asset
+verified at https://notochat-demo.onrender.com (Render live commit `6bf2076`).
+The API Blueprint remains prepared but unapplied, pending durable PostgreSQL and
+approved secrets. No continuous worker or live integrations. Full details and
+verification limits: `docs/RENDER_FREE_SETUP.md`.

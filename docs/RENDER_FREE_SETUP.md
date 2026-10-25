@@ -59,3 +59,26 @@ backend-connected demo, not live-verified messaging or production readiness.
 
 Official limits checked: https://render.com/docs/free
 Blueprint fields: https://render.com/docs/blueprint-spec
+
+## Verified frontend demo — 2026-10-25
+
+A separate native Node free web service is live at
+https://notochat-demo.onrender.com in confirmed workspace
+`tea-darmhfp7lnhs73e0d5n0`, Singapore. Service:
+`srv-dbf36ht9fdbs738lj200`; deploy: `dep-dbf36id9fdbs738lj3ig`.
+Deployed commit: `6bf20769121c317f5de3b04a8a1ef1ee7726d6ed`.
+Build: `npm --prefix frontend ci && npm --prefix frontend run build`.
+Start: `npm --prefix frontend start`; Node 24; automatic deploys off.
+This direct-created frontend is NOT managed by the backend `render.yaml`.
+
+Render status was `live`; public homepage HTTP 200, demo disclaimer/entry and
+nine referenced assets verified. Browser click-through was unavailable.
+177 Python tests and 19 frontend tests passed locally; backend Docker image
+build/runtime dependencies and Blueprint official JSON Schema validated.
+Render CLI validation was unavailable (CLI absent). Git push/remote SHA verified;
+GitHub Actions status lookup returned HTTP 401 Bad credentials, so this commit's
+remote CI result is unverified. No replacement credentials were created.
+
+Only the browser-local demo is deployed. No API, DB, worker or provider credentials
+were provisioned. Account login and live AI/messaging remain unconfigured. Existing
+MealOps service was not changed; both free services share workspace free hours.
