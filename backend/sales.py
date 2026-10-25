@@ -54,6 +54,12 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
             if prior.data.get('message_id'):
                 return await dispatch(c,prior.data['message_id'],s)
             return prior.data
+        if not any(word in norm(m.text) for word in ['refund','complaint','ফেরত চাই','অভিযোগ','টাকা ফেরত']):
+            intake=app.state.booking_intake_response(s,cid,m.text)
+            if intake is not None:
+                message=Message(conversation_id=cid,role='team',text=intake[:8000]);s.add(message);s.flush()
+                put(s,'sales',{'conversation_id':cid,'message_id':message.id,'created_at':now.isoformat()},rid);s.commit()
+                return await dispatch(c,message.id,s)
         english=live.get('language')=='English' or (live.get('language')=='Auto' and not any('\u0980'<=ch<='\u09ff' for ch in m.text) and not any(word in norm(m.text).split() for word in ['ki','koto','ache','diben','chai','vai','apnar']))
         def say(bn,en):return en if english else bn
         def handover(reason):
@@ -149,7 +155,9 @@ def install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,cre
         return await dispatch(c,message.id,s)
 
     async def dispatch(c,mid,s):
-        if c.channel=='Website':return {'sent':True,'delivery':'website-chat','message_id':mid}
+        if c.channel=='Website':
+            app.state.record_reply(s,c.id,mid,True);s.commit()
+            return {'sent':True,'delivery':'website-chat','message_id':mid}
         s.refresh(c)
         if c.mode!='ai':return {'sent':False,'handover':True,'message_id':mid}
         result=await app.state.deliver_automated(c.id,mid,s)

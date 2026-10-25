@@ -72,6 +72,7 @@ def install_couriers(app,Record,authorize,session,put,notify):
                 r=s.get(Record,shipment_id);r.data={**r.data,'status':'unconfirmed'};s.commit();raise HTTPException(502,'Courier booking could not be confirmed. Check the merchant dashboard; do not book a duplicate.')
         shipment=s.get(Record,shipment_id);shipment.data={**shipment.data,'status':'booked','provider_id':provider_id,'tracking':tracking}
         order=s.get(Record,rid);order.data={**order.data,'status':order.data['status'] if sandbox else 'shipped','tracking':tracking,'courier_status':'sandbox-booked' if sandbox else 'booked','courier':body.provider}
+        if not sandbox:app.state.schedule_lifecycle(s,order)
         notify(s,'Courier sandbox booking' if sandbox else 'Courier booked',d['customer'],d['conversation_id']);s.commit();return shipment.data
 
     async def sync(rid,s):
@@ -91,6 +92,7 @@ def install_couriers(app,Record,authorize,session,put,notify):
         new={**order.data,'courier_status':status}
         if not data['sandbox'] and status.casefold()=='delivered' and new['status']=='shipped':new['status']='delivered'
         order.data=new
+        if not data['sandbox']:app.state.schedule_lifecycle(s,order)
         if status!=previous:notify(s,'Courier status updated',status,order.data['conversation_id'])
         s.commit();return {'provider_status':status,'verified_with_provider':True,'sandbox':data['sandbox']}
 

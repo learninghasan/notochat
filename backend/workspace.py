@@ -84,6 +84,7 @@ class LeadInput(BaseModel):
 
 
 class BookingInput(BaseModel):
+    request_id: str | None = Field(default=None,min_length=8,max_length=100)
     conversation_id: int
     customer: str = Field(min_length=1, max_length=160)
     service: str = Field(min_length=1, max_length=200)
@@ -114,6 +115,8 @@ class AgentInput(BaseModel):
     auto_draft: bool = False
     auto_reply: bool = False
     auto_media_analysis: bool = False
+    auto_lifecycle: bool = False
+    followup_temperatures: list[Literal["Hot","Warm"]] = Field(default_factory=lambda:["Hot","Warm"],max_length=2)
     language: Literal["Bangla", "English", "Auto"] = "Auto"
     tone: Literal["Friendly", "Professional", "Concise"] = "Friendly"
     instructions: str = Field(default="", max_length=10000)
@@ -275,7 +278,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     @app.get("/workspace", dependencies=protected)
     def workspace(s: Session = Depends(session)):
         expire(s)
-        return {"leads": records(s,"leads"), "orders": records(s,"orders"), "bookings": records(s,"bookings"), "knowledge": records(s,"knowledge"), "notifications": records(s,"notifications"), "automations": records(s,"automations"), "team": records(s,"team"), "broadcasts": records(s,"broadcasts"), "agent": get(s,"agent:live").data, "agent_versions": records(s,"agent_versions"), "deliveries":records(s,"delivery"), "outreach":records(s,"outreach"), "attachments":records(s,"attachments"), "media_proposals":records(s,"media_proposals"), "media_cart_drafts":records(s,"media_cart_drafts"), "assistant_drafts":records(s,"assistant_drafts"), "jobs":records(s,"jobs"), "shipments":records(s,"shipments"), "conversation_meta": {str(c.id):meta(s,c.id) for c in s.scalars(select(Conversation))}}
+        return {"leads": records(s,"leads"), "orders": records(s,"orders"), "bookings": records(s,"bookings"), "knowledge": records(s,"knowledge"), "notifications": records(s,"notifications"), "automations": records(s,"automations"), "team": records(s,"team"), "broadcasts": records(s,"broadcasts"), "agent": get(s,"agent:live").data, "agent_versions": records(s,"agent_versions"), "deliveries":records(s,"delivery"), "outreach":records(s,"outreach"), "attachments":records(s,"attachments"), "media_proposals":records(s,"media_proposals"), "media_cart_drafts":records(s,"media_cart_drafts"), "comment_replies":records(s,"comment_replies"), "assistant_drafts":records(s,"assistant_drafts"), "jobs":records(s,"jobs"), "shipments":records(s,"shipments"), "conversation_meta": {str(c.id):meta(s,c.id) for c in s.scalars(select(Conversation))}}
 
     @app.post("/products", dependencies=protected)
     def create_product(body: ProductInput, s: Session = Depends(session)):
@@ -370,6 +373,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         if body.tracking:d["tracking"]=body.tracking
         r.data=d
         notify(s,"Order "+body.status,d["customer"],d["conversation_id"])
+        app.state.schedule_lifecycle(s,r)
         s.commit();return d
 
     @app.get("/orders/{rid}/receipt", dependencies=protected)
@@ -382,6 +386,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     def lead(body:LeadInput,s:Session=Depends(session)):
         conv(s,body.conversation_id)
         d=put(s,"leads",{**body.model_dump(),"created_at":stamp()},f"leads:{body.conversation_id}")
+        app.state.schedule_lifecycle(s,s.get(Record,d["id"]))
         s.commit();return d
 
     @app.put("/leads/{rid}", dependencies=protected)
@@ -389,23 +394,34 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         r=get(s,rid)
         if r.kind!="leads":raise HTTPException(404,"Lead not found")
         conv(s,body.conversation_id)
-        r.data={**r.data,**body.model_dump(),"updated_at":stamp()};s.commit();return r.data
+        r.data={**r.data,**body.model_dump(),"updated_at":stamp()}
+        app.state.schedule_lifecycle(s,r);s.commit();return r.data
 
     @app.post("/bookings", dependencies=protected)
     def booking(body:BookingInput,s:Session=Depends(session)):
         conv(s,body.conversation_id)
         # Serialize booking operations using the pre-existing workspace row.
         s.scalar(select(Record).where(Record.id=="agent:live").with_for_update())
+        key='bookings:'+str(body.conversation_id)+':'+body.request_id if body.request_id else None
+        fingerprint=json.dumps(body.model_dump(mode='json'),sort_keys=True)
+        existing=s.get(Record,key) if key else None
+        if existing:
+            if existing.data.get('fingerprint')!=fingerprint:raise HTTPException(409,'Booking request ID reused for different details')
+            return existing.data
         end=body.starts_at+timedelta(minutes=body.duration_minutes)
         for b in records(s,"bookings"):
             if b["resource"]==body.resource and b["status"]!="cancelled" and body.starts_at < datetime.fromisoformat(b["ends_at"]) and end > datetime.fromisoformat(b["starts_at"]):
                 raise HTTPException(409,"This resource already has a booking during that time")
-        d=put(s,"bookings",{**body.model_dump(mode="json"),"ends_at":end.isoformat(),"status":"requested","payment_status":"unverified","created_at":stamp()})
+        d=put(s,"bookings",{**body.model_dump(mode="json"),"ends_at":end.isoformat(),"status":"requested","payment_status":"unverified","created_at":stamp(),"fingerprint":fingerprint},key)
         notify(s,"Booking request",body.customer+" · "+body.service,body.conversation_id)
         s.commit();return d
 
+    from booking_intake import install_booking_intake
+    install_booking_intake(app,Record,Conversation,BookingInput,booking,authorize,session,put)
+
     @app.patch("/bookings/{rid}", dependencies=protected)
-    def booking_status(rid:str,body:BookingStatus,s:Session=Depends(session)):
+    def booking_status(rid:str,body:BookingStatus,s:Session=Depends(session),principal=Depends(authorize)):
+        if tenant and body.status=="confirmed" and (not principal or principal.get("role") not in ("owner","admin")):raise HTTPException(403,"Owner or admin confirmation is required")
         r=s.scalar(select(Record).where(Record.id==rid,Record.kind=="bookings").with_for_update())
         if not r:raise HTTPException(404,"Booking not found")
         d=copy.deepcopy(r.data)
@@ -416,7 +432,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         if body.status=="confirmed":
             for hours in (24,2):
                 due=datetime.fromisoformat(d["starts_at"])-timedelta(hours=hours)
-                if due>now():put(s,"automations",{"conversation_id":d["conversation_id"],"kind":"booking-reminder","text":f"Reminder: {d['service']} at {d['starts_at']}","due_at":due.isoformat(),"status":"draft","delivery":"not sent"})
+                if due>now():put(s,"automations",{"conversation_id":d["conversation_id"],"kind":"booking-reminder","text":f"Reminder: {d['service']} at {d['starts_at']}","due_at":due.isoformat(),"status":"draft","delivery":"not sent","source_id":rid,"source_kind":"bookings"})
         s.commit();return d
 
     @app.post("/knowledge", dependencies=protected)
@@ -437,6 +453,12 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
             score=sum(t in (d["title"]+" "+d["text"]).casefold() for t in terms)
             if score:scored.append({**d,"score":score,"match_type":"keyword"})
         return sorted(scored,key=lambda d:d["score"],reverse=True)[:10]
+
+    from lifecycle import install_lifecycle
+    install_lifecycle(app,Record,put)
+
+    from response_metrics import install_metrics
+    install_metrics(app,Record,put)
 
     from agent_review import install_agent_review
     install_agent_review(app,Record,AgentInput,authorize,session,put,catalog)
@@ -542,7 +564,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     @app.get("/analytics", dependencies=protected)
     def analytics(s:Session=Depends(session)):
         cs=list(s.scalars(select(Conversation)));orders=records(s,"orders")
-        return {"conversations":len(cs),"ai_mode":sum(c.mode=="ai" for c in cs),"human_mode":sum(c.mode=="human" for c in cs),"orders":len(orders),"confirmed_value":sum(o["total"] for o in orders if o["status"]!="cancelled"),"delivered_value":sum(o["total"] for o in orders if o["status"]=="delivered"),"leads":len(records(s,"leads")),"bookings":len(records(s,"bookings")),"open_notifications":sum(not n["done"] for n in records(s,"notifications")),"ai_replies":len(records(s,"usage")),"note":"AI mode is ownership, not proof of an AI response; order values are not verified payments."}
+        return {**app.state.response_metrics(s),"conversations":len(cs),"ai_mode":sum(c.mode=="ai" for c in cs),"human_mode":sum(c.mode=="human" for c in cs),"orders":len(orders),"confirmed_value":sum(o["total"] for o in orders if o["status"]!="cancelled"),"delivered_value":sum(o["total"] for o in orders if o["status"]=="delivered"),"leads":len(records(s,"leads")),"bookings":len(records(s,"bookings")),"open_notifications":sum(not n["done"] for n in records(s,"notifications")),"ai_replies":len(records(s,"usage")),"note":"AI mode is ownership, not proof of an AI response; order values are not verified payments."}
 
     @app.get("/integrations", dependencies=protected)
     def integrations(s:Session=Depends(session)):
@@ -555,7 +577,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         for channel in ("Messenger","Instagram","WhatsApp"):
             ready=bool(configured[channel] and channel in received and settings.get("ENABLE_LIVE_SEND")=="1")
             result.append({"name":channel,"configured":configured[channel],"ready":ready,"detail":"Official webhook and text delivery adapter implemented. Requires channel credentials, signed inbound verification and ENABLE_LIVE_SEND=1. Provider permissions need live end-to-end testing."})
-        result.extend([{"name":"Facebook comments","configured":bool(meta_base and settings.get("META_PAGE_ID")),"ready":False,"detail":"Signed comment ingestion implemented. Comment replies and private replies are not implemented."},{"name":"Steadfast","configured":bool(settings.get("STEADFAST_API_KEY") and settings.get("STEADFAST_SECRET_KEY")),"ready":False,"detail":"Explicit booking and authenticated status adapter implemented. Merchant credentials and live verification required."},{"name":"Pathao","configured":all(settings.get(k) for k in ["PATHAO_CLIENT_ID","PATHAO_CLIENT_SECRET","PATHAO_USERNAME","PATHAO_PASSWORD"]),"ready":False,"detail":"Merchant booking/status adapter implemented; sandbox is the default. Live merchant verification required."},{"name":"Hosted recharge","configured":bool(os.getenv("SSLCOMMERZ_STORE_ID") and os.getenv("SSLCOMMERZ_STORE_PASSWORD")),"ready":False,"detail":"SSLCommerz hosted recharge with server-verified credit posting. Available payment methods depend on the merchant account; sandbox credits cannot fund real AI."}])
+        result.extend([{"name":"Facebook comments","configured":bool(meta_base and settings.get("META_PAGE_ID")),"ready":False,"detail":"Signed comment ingestion and explicit public/private replies implemented. Requires approved page permissions and live verification."},{"name":"Steadfast","configured":bool(settings.get("STEADFAST_API_KEY") and settings.get("STEADFAST_SECRET_KEY")),"ready":False,"detail":"Explicit booking and authenticated status adapter implemented. Merchant credentials and live verification required."},{"name":"Pathao","configured":all(settings.get(k) for k in ["PATHAO_CLIENT_ID","PATHAO_CLIENT_SECRET","PATHAO_USERNAME","PATHAO_PASSWORD"]),"ready":False,"detail":"Merchant booking/status adapter implemented; sandbox is the default. Live merchant verification required."},{"name":"Hosted recharge","configured":bool(os.getenv("SSLCOMMERZ_STORE_ID") and os.getenv("SSLCOMMERZ_STORE_PASSWORD")),"ready":False,"detail":"SSLCommerz hosted recharge with server-verified credit posting. Available payment methods depend on the merchant account; sandbox credits cannot fund real AI."}])
         return result
 
     @app.get("/billing", dependencies=protected)

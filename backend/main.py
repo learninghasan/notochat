@@ -82,13 +82,15 @@ def create_workspace(engine, trusted_identity=False, seed_sample=True):
     @app.get("/conversations/{cid}/messages", dependencies=[Depends(authorize)])
     def messages(cid:int,s:Session=Depends(session)):
         conversation(s,cid)
-        return [{"id":m.id,"role":m.role,"text":m.text} for m in s.scalars(select(Message).where(Message.conversation_id==cid).order_by(Message.id))]
+        return [{"id":m.id,"role":m.role,"text":m.text,"verified_comment":bool((proof:=s.get(Base.WorkspaceRecord,f"verified_message:{m.id}")) and proof.data.get("channel")=="Facebook comments")} for m in s.scalars(select(Message).where(Message.conversation_id==cid).order_by(Message.id))]
     @app.post("/conversations/{cid}/messages", dependencies=[Depends(authorize)])
     def reply(cid:int,body:Reply,s:Session=Depends(session)):
         c=conversation(s,cid)
         if c.mode != "human": raise HTTPException(409,"Take over the conversation before replying")
         if not body.text.strip(): raise HTTPException(422,"Message cannot be blank")
-        s.add(Message(conversation_id=cid,role="team",text=body.text.strip())); s.commit()
+        message=Message(conversation_id=cid,role="team",text=body.text.strip());s.add(message);s.flush()
+        if c.channel=="Website":app.state.record_reply(s,cid,message.id)
+        s.commit()
         return {"saved":True,"delivery":"local-only; channel not connected"}
     @app.patch("/conversations/{cid}/mode", dependencies=[Depends(authorize)])
     def mode(cid:int,body:Mode,s:Session=Depends(session)):

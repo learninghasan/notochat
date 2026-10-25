@@ -168,3 +168,11 @@ with Session(business_app.state.engine) as s:
     assert s.get(Record,'source:'+attachment_id) is None
 assert media_calls==['https://api.openai.com/v1/responses'],media_calls
 print('PASS: PostgreSQL concurrent media jobs generate one review draft and one mocked AI call')
+
+# Booking-intake retries reuse the original requested slot under a real row lock.
+from datetime import datetime,timezone,timedelta
+retry_booking={'conversation_id':c['id'],'customer':'QA intake','service':'QA appointment','starts_at':(datetime.now(timezone.utc)+timedelta(days=10)).isoformat(),'resource':'Intake QA','request_id':'intake-qa-'+prefix}
+with ThreadPoolExecutor(max_workers=2) as pool:booking_retries=list(pool.map(lambda _:call(orgA,'POST','/bookings',retry_booking),range(2)))
+assert all(r.status_code==200 for r in booking_retries),[r.text for r in booking_retries]
+assert booking_retries[0].json()['id']==booking_retries[1].json()['id']
+print('PASS: PostgreSQL concurrent booking-intake request retries reserve one slot')

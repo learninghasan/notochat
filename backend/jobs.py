@@ -101,6 +101,9 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
                     elif data['kind']=='reminder_prepare':
                         a=s.get(Record,payload['automation_id'])
                         if not a or a.kind!='automations':raise ValueError('Reminder no longer exists')
+                        if not app.state.lifecycle_source_valid(s,a.data):
+                            a.data={**a.data,'status':'blocked','delivery':'Source changed; reminder cancelled'}
+                            record=s.get(Record,rid);record.data={**data,'status':'done','output':{'sent':False,'blocked':'Source changed'},'finished_at':now().isoformat(),'lease_until':''};s.commit();processed.append(rid);continue
                         eligible=within_window(s,c.id)
                         a.data={**a.data,'status':'ready' if eligible else 'blocked','delivery':'not sent','eligibility_checked_at':now().isoformat()}
                         notify(s,'Reminder ready for review' if eligible else 'Reminder blocked by reply window',a.data['text'],c.id)

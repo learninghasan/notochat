@@ -64,7 +64,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
                         events.append({'channel':'WhatsApp','sender':str(m.get('from','')),'account':phone,'message_id':m.get('id',''),'text':m.get('text',{}).get('body') or '[Media received; open in WhatsApp]','timestamp':float(m.get('timestamp',0)),'attachments':[{**m.get(m.get('type'),{}),'type':m.get('type')}] if m.get('type') in ('image','audio','video','document') else []})
                 if change.get('field')=='feed' and value.get('item')=='comment' and value.get('verb')=='add':
                     page=str(entry.get('id',''))
-                    if app.state.channel_account('Facebook comments',page):
+                    if app.state.channel_account('Facebook comments',page) and str(value.get('from',{}).get('id',''))!=page:
                         events.append({'channel':'Facebook comments','sender':str(value.get('from',{}).get('id','')),'account':page,'message_id':value.get('comment_id',''),'text':value.get('message','[Comment]'),'timestamp':value.get('created_time',0)})
         count=0
         for e in events:
@@ -95,7 +95,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
                 d.update(last_inbound=t.isoformat(),last_verified_inbound=t.isoformat(),source='signed-meta-webhook',sender=e['sender'],account=e['account'],channel=e['channel'],account_name=(app.state.channel_account(e['channel'],e['account']) or {}).get('account_name',e['account']))
                 put(s,'conversation',f'conversation:{c.id}',d)
             message=Message(conversation_id=c.id,role='customer',text=str(e['text'])[:8000]);s.add(message);s.flush()
-            put(s,'verified_message',f'verified_message:{message.id}',{'conversation_id':c.id,'message_id':message.id,'source':'signed-meta-webhook'})
+            put(s,'verified_message',f'verified_message:{message.id}',{'conversation_id':c.id,'message_id':message.id,'source':'signed-meta-webhook','channel':e['channel'],'account':e['account'],'provider_id':e['message_id'],'received_at':t.isoformat()})
             app.state.ingest_attachments(s,c.id,message.id,e)
             app.state.queue_auto_draft(s,c.id,message.id)
             put(s,'inbound',dedup,{'conversation_id':c.id,'provider_id':e['message_id'],'created_at':datetime.now(timezone.utc).isoformat()})
@@ -143,7 +143,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
         except (httpx.HTTPError,ValueError):
             put(s,'delivery',rid,{'status':'unconfirmed','message_id':message.id,'conversation_id':cid});s.commit()
             raise HTTPException(502,'Delivery could not be confirmed. Check the original channel before retrying.')
-        put(s,'delivery',rid,{'status':'sent','message_id':message.id,'conversation_id':cid,'provider_id':provider_id});s.commit()
+        put(s,'delivery',rid,{'status':'sent','message_id':message.id,'conversation_id':cid,'provider_id':provider_id});app.state.record_reply(s,cid,message.id,automated);s.commit()
         return s.get(Record,rid).data
 
     @app.post('/conversations/{cid}/deliver',dependencies=[Depends(authorize)])
@@ -153,3 +153,5 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
     async def automated(cid,mid,s):
         return await send_message(cid,DeliveryInput(message_id=mid),s,automated=True)
     app.state.deliver_automated=automated
+    from comment_replies import install_comment_replies
+    install_comment_replies(app,Record,Conversation,Message,authorize,session,configuration)
