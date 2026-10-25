@@ -3,7 +3,7 @@ import hashlib,json,os,re,secrets,time
 from urllib.parse import urlencode,urlsplit
 from fastapi import Depends,HTTPException
 from pydantic import BaseModel,Field
-from sqlalchemy import select,update
+from sqlalchemy import delete,update
 
 class Complete(BaseModel):
     state:str=Field(min_length=32,max_length=200)
@@ -33,7 +33,11 @@ def install_meta_oauth(app,Record,authorize,session):
 
     @app.post('/oauth/meta/start')
     def start(p=Depends(authorize),s=Depends(session)):
-        owner(p);cfg=config();cipher();state=secrets.token_urlsafe(40)
+        owner(p);cfg=config();cipher()
+        # Expired one-time states and encrypted page candidates have no further use.
+        # Keep cleanup tenant-local and preserve any authorization still in progress.
+        s.execute(delete(Record).where(Record.kind=='private_oauth',Record.data['expires_at'].as_float()<time.time()))
+        state=secrets.token_urlsafe(40)
         save(s,'oauth-state:'+hashlib.sha256(state.encode()).hexdigest(),'private_oauth',{'user_id':p['user_id'],'organization_id':p['organization_id'],'expires_at':time.time()+600,'status':'pending'});s.commit()
         params={'client_id':cfg['META_OAUTH_APP_ID'],'redirect_uri':cfg['redirect'],'state':state,'response_type':'code','scope':'pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages'}
         return {'url':'https://www.facebook.com/'+cfg['META_OAUTH_GRAPH_VERSION']+'/dialog/oauth?'+urlencode(params)}

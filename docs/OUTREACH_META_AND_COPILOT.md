@@ -12,7 +12,7 @@ Implemented 25 October 2026. Provider calls in tests are mocked; real Meta autho
 
 Authorization state expires in 10 minutes, is single-use, and is bound to the original account/business plus an HttpOnly browser cookie. Changing the active business interrupts completion. Candidate page tokens are encrypted and never returned to the browser. Shared-app account bindings are unique across businesses. The gateway validates the original webhook signature before routing; each workspace also validates the signature and recipient account.
 
-WhatsApp still uses its configured official credentials; this flow does not implement WhatsApp Embedded Signup. App review, token expiry/revocation UX, multiple pages per business and account-transfer/release workflows remain operational/product follow-ups. Expired encrypted pending OAuth records are inaccessible but not yet automatically purged. If OAuth is configured, the root `/webhooks/meta` belongs to the shared app; business-specific legacy/manual callbacks remain at `/business/ORGANIZATION_ID/webhooks/meta`.
+WhatsApp still uses its configured official credentials; this flow does not implement WhatsApp Embedded Signup. App review, token expiry/revocation UX, multiple pages per business and account-transfer/release workflows remain operational/product follow-ups. Expired encrypted pending OAuth records are purged tenant-locally when an owner/admin starts a new authorization. A scheduled purge for inactive businesses is not installed. If OAuth is configured, the root `/webhooks/meta` belongs to the shared app; business-specific legacy/manual callbacks remain at `/business/ORGANIZATION_ID/webhooks/meta`.
 
 ## Follow-ups and broadcasts
 

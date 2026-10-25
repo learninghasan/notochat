@@ -72,3 +72,20 @@ def test_expired_state_and_unlisted_page_are_rejected(configured):
     assert call(c,'org_A','POST','/oauth/meta/complete',{'state':state,'code':'fake'}).status_code==400
     connect(c)
     assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'99999'}).status_code==404
+
+
+def test_start_purges_expired_secrets_only_in_current_business(configured):
+    c,g,_=configured
+    connect(c,'org_A');connect(c,'org_B')
+    engine=g.workspace('org_A').state.engine
+    with Session(engine) as s:
+        r=s.get(Base.WorkspaceRecord,'oauth-pages:user_test');r.data={**r.data,'expires_at':0}
+        s.add(Base.WorkspaceRecord(id='oauth-state:expired',kind='private_oauth',data={'expires_at':0,'status':'consumed'}))
+        s.add(Base.WorkspaceRecord(id='unrelated-record',kind='knowledge',data={'expires_at':0,'title':'Keep me'}));s.commit()
+    fresh=start(c,'org_A')
+    with Session(engine) as s:
+        assert s.get(Base.WorkspaceRecord,'oauth-pages:user_test') is None
+        assert s.get(Base.WorkspaceRecord,'oauth-state:expired') is None
+        assert s.get(Base.WorkspaceRecord,'unrelated-record') is not None
+        assert s.get(Base.WorkspaceRecord,'oauth-state:'+hashlib.sha256(fresh.encode()).hexdigest()) is not None
+    assert call(c,'org_B','GET','/oauth/meta/pages').status_code==200
