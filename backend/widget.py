@@ -85,5 +85,5 @@ def install_widget(app,engine,Record,Conversation,Message,session,configuration=
         message=Message(conversation_id=cid,role='customer',text=body.text.strip());s.add(message);s.flush()
         app.state.queue_auto_draft(s,cid,message.id)
         r.data={**r.data,'count':r.data['count']+1,'last_sent':now.isoformat()}
-        meta=s.get(Record,f'conversation:{cid}');meta.data={**meta.data,'last_inbound':now.isoformat()}
+        meta=s.get(Record,f'conversation:{cid}');meta.data={**meta.data,'last_inbound':now.isoformat(),'last_verified_inbound':now.isoformat()}
         s.commit();return {'saved':True}

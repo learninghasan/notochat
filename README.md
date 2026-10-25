@@ -106,3 +106,7 @@ Tests cover stock atomicity/idempotency, order transitions, booking overlap/remi
 ## Deployment limits
 
 Core courier/recharge adapters, channel access, push and bounded automatic sales are implemented but require configuration and live verification. Advanced reference features and production operations remain unfinished; see the current feature map. Directory entries are profiles; real account members/invitations are managed separately with Better Auth; advance amounts are unverified; reminder/broadcast entries are drafts. Database schema creation is additive via SQLAlchemy create_all; managed migration/rollback and backup procedures are still required. Review [FEATURES.md](docs/FEATURES.md) before onboarding real businesses.
+
+### Meta OAuth, outreach and browser copilot
+
+Account-bound Meta onboarding, consent-aware broadcasts, optional automatic reminders and the Chrome side-panel copilot are now implemented. See [setup and verification boundaries](docs/OUTREACH_META_AND_COPILOT.md). The [feature matrix](docs/FEATURES.md) distinguishes implemented code from features and live-service verification still pending.

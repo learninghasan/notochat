@@ -54,6 +54,7 @@ assert all(x['channel']=='Website' for x in scoped.json())
 assert call(orgA,'GET',f"/conversations/{private['id']}/messages",role='member').status_code==404
 
 # Two concurrent verified callbacks cannot post a credit twice.
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from main import Base
 import httpx
@@ -76,3 +77,27 @@ with ThreadPoolExecutor(max_workers=2) as pool:
 assert all(r.status_code==200 for r in callbacks),[r.text for r in callbacks]
 assert call(orgA,'GET','/billing').json()['sandbox_balance']==10
 print('PASS: PostgreSQL channel scopes and concurrent credit callback idempotency')
+
+# Concurrent broadcast confirmation and two workers deliver each website message once.
+import asyncio
+from main import Conversation,Message
+customers=[c['id'],call(orgA,'POST','/conversations',{'customer':'Second outreach QA customer','channel':'Website'}).json()['id']]
+with Session(business_app.state.engine) as s:
+    for cid in customers:
+        customer=s.get(Conversation,cid);customer.mode='ai'
+        rid=f'conversation:{cid}';record=s.get(Record,rid)
+        data={'source':'website-widget','last_verified_inbound':datetime.now(timezone.utc).isoformat(),'last_inbound':datetime.now(timezone.utc).isoformat(),'marketing_opt_in':True}
+        if record:record.data=data
+        else:s.add(Record(id=rid,kind='conversation',data=data))
+    s.commit()
+broadcast=call(orgA,'POST','/broadcasts/preview',{'text':'Concurrent outreach QA','channel':'Website'}).json()
+with ThreadPoolExecutor(max_workers=2) as pool:
+    confirmations=list(pool.map(lambda _:call(orgA,'POST','/broadcasts/'+broadcast['id']+'/send',{'confirm':'SEND ELIGIBLE RECIPIENTS'}),range(2)))
+assert all(r.status_code==200 for r in confirmations),[r.text for r in confirmations]
+assert len(call(orgA,'GET','/jobs').json())==2
+with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(lambda _:asyncio.run(business_app.state.run_jobs()),range(2)))
+result=next(x for x in call(orgA,'GET','/workspace').json()['broadcasts'] if x['id']==broadcast['id'])
+assert result['status']=='completed' and result['sent']==2,result
+with Session(business_app.state.engine) as s:
+    for cid in customers:assert len(list(s.scalars(select(Message).where(Message.conversation_id==cid,Message.text=='Concurrent outreach QA'))))==1
+print('PASS: PostgreSQL concurrent broadcast confirmation, worker claims, exact sent counts and duplicate prevention')

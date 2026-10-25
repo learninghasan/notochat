@@ -19,13 +19,15 @@ from pathlib import Path
 from sqlalchemy import MetaData, Table, Column, String, Float, create_engine, insert, delete, select, text
 from sqlalchemy.exc import IntegrityError
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse,PlainTextResponse
+from fastapi import HTTPException
 
 from main import app as legacy_app, engine as registry_engine, create_workspace
 
 metadata=MetaData()
 registry=Table('notochat_business_registry',metadata,Column('organization_id',String(200),primary_key=True),Column('namespace',String(80),unique=True,nullable=False))
 audit=Table('notochat_audit_events',metadata,Column('id',String(40),primary_key=True),Column('organization_id',String(200),index=True),Column('user_id',String(200)),Column('method',String(10)),Column('path',String(500)),Column('status',String(10)),Column('created_at',Float))
+meta_accounts=Table('notochat_meta_accounts',metadata,Column('account_id',String(100),primary_key=True),Column('organization_id',String(200),nullable=False))
 nonces=Table('notochat_identity_nonces',metadata,Column('nonce',String(100),primary_key=True),Column('expires_at',Float,nullable=False))
 
 
@@ -86,13 +88,56 @@ class BusinessGateway:
             def read_audit():
                 with self.engine.connect() as connection:
                     return [dict(row) for row in connection.execute(select(audit).where(audit.c.organization_id==organization_id).order_by(audit.c.created_at.desc()).limit(100)).mappings()]
+            def bind_meta_accounts(accounts):
+                try:
+                    with self.engine.begin() as connection:
+                        for account in accounts:
+                            row=connection.execute(select(meta_accounts).where(meta_accounts.c.account_id==account)).first()
+                            if row and row.organization_id!=organization_id:raise HTTPException(409,'This Meta account is already connected to another business')
+                            if not row:connection.execute(insert(meta_accounts).values(account_id=account,organization_id=organization_id))
+                except IntegrityError:raise HTTPException(409,'Account connection changed concurrently; retry')
+            app.state.bind_meta_accounts=bind_meta_accounts
             app.state.audit_events=read_audit
             self.cache[organization_id]=app
             if len(self.cache)>32:self.cache.popitem(last=False)
             return app
 
+    async def meta_webhook(self,scope,receive,send):
+        request=Request(scope,receive=receive)
+        if scope['method']=='GET':
+            expected=os.getenv('META_OAUTH_VERIFY_TOKEN','')
+            q=request.query_params
+            if expected and q.get('hub.mode')=='subscribe' and hmac.compare_digest(q.get('hub.verify_token',''),expected):return await PlainTextResponse(q.get('hub.challenge',''))(scope,receive,send)
+            return await JSONResponse({'detail':'Invalid verification token'},status_code=403)(scope,receive,send)
+        if scope['method']!='POST':return await JSONResponse({'detail':'Method not allowed'},status_code=405)(scope,receive,send)
+        body=await request.body()
+        if len(body)>2_000_000:return await JSONResponse({'detail':'Webhook too large'},status_code=413)(scope,receive,send)
+        digest='sha256='+hmac.new(os.environ['META_OAUTH_APP_SECRET'].encode(),body,hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(request.headers.get('x-hub-signature-256',''),digest):return await JSONResponse({'detail':'Invalid webhook signature'},status_code=401)(scope,receive,send)
+        try:
+            payload=json.loads(body);accounts=set()
+            for entry in payload.get('entry',[])[:100]:
+                accounts.add(str(entry.get('id','')))
+                for event in entry.get('messaging',[])[:100]:accounts.add(str(event.get('recipient',{}).get('id','')))
+            with self.engine.connect() as connection:
+                organizations=set(connection.execute(select(meta_accounts.c.organization_id).where(meta_accounts.c.account_id.in_(accounts))).scalars())
+        except (ValueError,TypeError,AttributeError):return await JSONResponse({'detail':'Malformed webhook'},status_code=400)(scope,receive,send)
+        failed=False;stored=0
+        for org in organizations:
+            child=await asyncio.to_thread(self.workspace,org)
+            result=[]
+            async def child_receive():return {'type':'http.request','body':body,'more_body':False}
+            async def child_send(message):result.append(message)
+            await child(scope,child_receive,child_send)
+            if not result or result[0].get('status',500)>=400:failed=True
+            else:
+                try:stored+=json.loads(b''.join(x.get('body',b'') for x in result)).get('stored',0)
+                except ValueError:failed=True
+        return await JSONResponse({'received':not failed,'stored':stored},status_code=503 if failed else 200)(scope,receive,send)
+
     async def __call__(self,scope,receive,send):
         if scope['type']!='http':return await self.legacy(scope,receive,send)
+        if scope['path']=='/webhooks/meta' and os.getenv('META_OAUTH_APP_SECRET'):return await self.meta_webhook(scope,receive,send)
         request=Request(scope,receive=receive)
         headers=request.headers
         public=re.fullmatch(r'/business/([A-Za-z0-9_-]{1,200})(/webhooks/(?:meta|courier)|/widget(?:/sessions|/messages)?|/payments/(?:ipn|return))',scope['path'])

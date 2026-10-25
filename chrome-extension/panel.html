@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NotoChat Copilot</title><link rel="stylesheet" href="panel.css"></head><body>
+<header><b>n</b><div><h1>NotoChat</h1><small>Your business copilot</small></div></header>
+<p>Keep a signed-in NotoChat tab open with your business selected.</p>
+<label for="origin">NotoChat app URL</label><input id="origin" type="url" placeholder="https://your-app.vercel.app"><button id="connect">Connect workspace</button>
+<p id="status" role="status">Not connected</p>
+<section id="workspace" hidden><label for="customer">Choose the matching customer</label><select id="customer"></select>
+<div class="actions"><button id="summary">Summarize</button><button id="draft">Draft reply</button></div>
+<label for="question">Question or selected customer text</label><textarea id="question" maxlength="4000" rows="5" placeholder="What should I suggest to this customer?"></textarea>
+<button class="secondary" id="selection">Use selected text from active tab</button><small>This copies only text you selected. Check it before asking AI.</small><button id="ask">Ask AI</button>
+<h2>Review before using</h2><pre id="output" aria-live="polite"></pre><button class="secondary" id="copy" disabled>Copy answer</button><p>AI can make mistakes. Check prices, stock and customer details. Copilot never sends a reply or places an order.</p></section>
+<script type="module" src="panel.js"></script></body></html>

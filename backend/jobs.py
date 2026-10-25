@@ -14,6 +14,14 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
             if existing:return existing.data
         return put(s,'jobs',{'kind':kind,'payload':payload,'status':'pending','attempts':0,'next_run_at':(due or now()).isoformat(),'created_at':now().isoformat(),'lease_until':'','error':''},'jobs:'+key if key else None)
 
+    def update_broadcast(s,bid):
+        if not bid:return
+        b=s.scalar(select(Record).where(Record.id==bid,Record.kind=='broadcasts').with_for_update().execution_options(populate_existing=True))
+        if not b:return
+        jobs=[j.data for j in s.scalars(select(Record).where(Record.kind=='jobs').execution_options(populate_existing=True)) if j.data['payload'].get('broadcast_id')==bid]
+        b.data={**b.data,'sent':sum(bool(j.get('output',{}).get('sent')) for j in jobs),'status':'completed' if all(j['status'] in ('done','failed','cancelled') for j in jobs) else 'queued'}
+        s.commit()
+
     def queue_auto(s,cid,mid):
         c=s.get(Conversation,cid);live=s.get(Record,'agent:live')
         if c and c.mode=='ai' and live and (live.data.get('auto_draft',False) or live.data.get('auto_reply',False)):
@@ -48,7 +56,7 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
         r=s.scalar(select(Record).where(Record.id==rid,Record.kind=='jobs').with_for_update())
         if not r:raise HTTPException(404,'Job not found')
         if r.data['status'] not in ('pending','failed'):raise HTTPException(409,'This job cannot be cancelled')
-        r.data={**r.data,'status':'cancelled'};s.commit();return r.data
+        r.data={**r.data,'status':'cancelled'};s.commit();update_broadcast(s,r.data['payload'].get('broadcast_id'));return r.data
 
     def claim(s):
         timestamp=now().isoformat()
@@ -59,7 +67,7 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
             expired=d['status']=='running' and d.get('lease_until','')<=timestamp
             if not due and not expired:continue
             if d['attempts']>=3:
-                record.data={**d,'status':'failed','error':'Maximum attempts reached; inspect before requeueing'};s.commit();continue
+                record.data={**d,'status':'failed','error':'Maximum attempts reached; inspect before requeueing'};s.commit();update_broadcast(s,d['payload'].get('broadcast_id'));continue
             new={**d,'status':'running','attempts':d['attempts']+1,'lease_until':(now()+timedelta(minutes=3)).isoformat()}
             # Conditional atomic update is the claim; only one worker can win the old state.
             updated=s.execute(update(Record).where(Record.id==record.id,Record.data['status'].as_string()==d['status'],Record.data['attempts'].as_integer()==d['attempts']).values(data=new))
@@ -78,7 +86,9 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
                 try:
                     payload=data['payload'];c=s.get(Conversation,payload['conversation_id'])
                     if not c:raise ValueError('Conversation no longer exists')
-                    if data['kind']=='sales_agent':
+                    if data['kind']=='outreach':
+                        output=await app.state.deliver_outreach(s,c.id,payload['text'],rid,payload.get('marketing',False))
+                    elif data['kind']=='sales_agent':
                         output=await app.state.sales_respond(c.id,payload['message_id'],s)
                     elif data['kind']=='reminder_prepare':
                         a=s.get(Record,payload['automation_id'])
@@ -87,6 +97,9 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
                         a.data={**a.data,'status':'ready' if eligible else 'blocked','delivery':'not sent','eligibility_checked_at':now().isoformat()}
                         notify(s,'Reminder ready for review' if eligible else 'Reminder blocked by reply window',a.data['text'],c.id)
                         output={'prepared':eligible,'sent':False}
+                        if a.data.get('auto_send'):
+                            output=await app.state.deliver_outreach(s,c.id,a.data['text'],rid,a.data['kind'] in ('followup','review'))
+                            a=s.get(Record,payload['automation_id']);a.data={**a.data,'status':'sent' if output.get('sent') else 'blocked','delivery':'sent' if output.get('sent') else output.get('blocked','not sent')}
                     elif data['kind']=='ai_draft':
                         latest=s.scalar(select(Message).where(Message.conversation_id==c.id,Message.role=='customer').order_by(Message.id.desc()).limit(1))
                         expected=payload.get('message_id')
@@ -104,11 +117,13 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
                                 output={'draft_id':draft['id'],'sent':False}
                     else:raise ValueError('Unknown job kind')
                     record=s.get(Record,rid);record.data={**data,'status':'done','output':output,'finished_at':now().isoformat(),'lease_until':''};s.commit();processed.append(rid)
+                    update_broadcast(s,payload.get('broadcast_id'))
                 except Exception as error:
                     s.rollback();record=s.get(Record,rid)
                     detail=error.detail if isinstance(error,HTTPException) else str(error)
                     # Keep provider payloads/keys out of persisted diagnostic text.
                     record.data={**data,'status':'failed' if data['attempts']>=3 else 'pending','next_run_at':(now()+timedelta(seconds=30*2**data['attempts'])).isoformat(),'lease_until':'','error':str(detail)[:300]};s.commit()
+                    update_broadcast(s,data['payload'].get('broadcast_id'))
         return processed
 
     app.state.run_jobs=run_jobs

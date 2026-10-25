@@ -27,7 +27,9 @@ async function proxy(request,{params}){
   if(!session.session.activeOrganizationId)return Response.json({detail:'Choose or create a business first'},{status:403});
   let member;
   try{member=await auth.api.getActiveMember({headers:request.headers})}catch{return Response.json({detail:'Active business membership is required'},{status:403})}
-  if(member.userId!==session.user.id||member.organizationId!==session.session.activeOrganizationId)return Response.json({detail:'Business membership could not be verified'},{status:403});
+  if(!member||member.userId!==session.user.id||member.organizationId!==session.session.activeOrganizationId)return Response.json({detail:'Business membership could not be verified'},{status:403});
+  const expectedBusiness=request.headers.get('X-NotoChat-Expected-Organization');
+  if(expectedBusiness&&expectedBusiness!==member.organizationId)return Response.json({detail:'Active business changed in another tab. Reopen the workspace before continuing.'},{status:409});
   let proof;
   try{proof=signedIdentity({userId:session.user.id,organizationId:member.organizationId,role:member.role},request.method,path+new URL(request.url).search,createHash('sha256').update(body?Buffer.from(body):'').digest('hex'),process.env.INTERNAL_API_SECRET)}catch{return Response.json({detail:'Business API trust is not configured'},{status:503})}
   headers['X-NotoChat-Identity']=proof.payload;headers['X-NotoChat-Signature']=proof.signature;

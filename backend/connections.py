@@ -91,5 +91,6 @@ def install_connections(app,engine,Record,authorize,session,tenant):
         if r:s.delete(r);s.commit()
         return {'removed':True,'note':'Provider tokens are removed locally; revoke access at Meta separately if necessary.'}
 
+    app.state.credential_cipher=cipher
     app.state.channel_configuration=read
     return read

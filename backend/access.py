@@ -34,7 +34,7 @@ def install_access(app,Record,Conversation,Message,authorize,session,put,tenant)
         if p['assigned_only']:
             ids=[cid for cid in ids if (s.get(Record,f'conversation:{cid}') and s.get(Record,f'conversation:{cid}').data.get('assignee_user_id')==principal['user_id'])]
         order_ids=[r.id for r in s.scalars(select(Record).where(Record.kind=='orders')) if r.data['conversation_id'] in ids]
-        scoped=['orders','leads','bookings','automations','assistant_drafts','sales','usage','delivery','channel','inbound']
+        scoped=['orders','leads','bookings','automations','assistant_drafts','sales','usage','delivery','channel','inbound','outreach']
         condition=or_(
             and_(Record.kind.in_(scoped),Record.data['conversation_id'].as_integer().in_(ids)),
             and_(Record.kind=='conversation',Record.id.in_([f'conversation:{cid}' for cid in ids])),

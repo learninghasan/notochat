@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "NotoChat Copilot",
+  "version": "0.1.0",
+  "description": "Review customer summaries and draft replies using your signed-in NotoChat workspace.",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "action": {"default_title": "Open NotoChat Copilot"},
+  "side_panel": {"default_path": "panel.html"}
+}
