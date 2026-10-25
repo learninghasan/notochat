@@ -27,3 +27,10 @@ User/operator-dependent: restore/verify the connected Vercel identity and write 
 ## GitHub access boundary
 
 Reading commits, check runs and Actions run lists succeeds. Reading repository Actions settings via `GET /repos/learninghasan/notochat/actions/permissions` returns HTTP 403 `Resource not accessible by integration`. This prevents diagnosing settings through that integration; it does not prove workflows are disabled. Do not change accounts to evade the denial. Observe the workflow’s run after the authorized push and report its actual outcome.
+
+## Continuation results
+
+- Commit `6d5294ae23d659764b8b948f758844b5620d2500` was pushed to the existing repository. Its first remote [GitHub Actions run](https://github.com/learninghasan/notochat/actions/runs/40203620653) passed both jobs: 68 Python tests, 15 JavaScript tests, production build, extension syntax and disposable PostgreSQL isolation/concurrency checks. Repository settings access remains denied, but actual Actions execution is now verified.
+- A real local Next.js development server and FastAPI gateway, with fresh disposable SQLite auth/tenant databases, passed `scripts/http-smoke.mjs`: signup, business creation, signed proxy, local support reply, order/stock/idempotency, export, second-business isolation, stale-business rejection and logout. No external providers or customer sends were used. This is HTTP integration verification, not browser interaction or production-host verification.
+- The same HTTP smoke test is now part of the backend CI job. The test refuses non-local origins and requires `NOTOCHAT_DISPOSABLE_STACK=1`. Local testing requires fresh disposable auth/database paths, the same trust secret on frontend/backend, `BACKEND_URL`, a migrated auth schema and servers on ports 18030/18000. Never point this test at customer data.
+- `next dev` generated `frontend/AGENTS.md`; it is retained as repository guidance. No production service or persistent provider credentials were provisioned.

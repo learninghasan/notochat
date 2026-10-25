@@ -58,3 +58,38 @@ jobs:
           NOTOCHAT_DISPOSABLE_DATABASE: '1'
           PYTHONPATH: backend
         run: python backend/qa/postgres_check.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - name: Exercise the actual local HTTP stack
+        env:
+          AUTH_SQLITE_PATH: /tmp/notochat-http-auth.db
+          BETTER_AUTH_SECRET: disposable-ci-auth-secret-over-thirty-two-characters
+          BETTER_AUTH_URL: http://localhost:18030
+          BACKEND_URL: http://127.0.0.1:18000
+          INTERNAL_API_SECRET: disposable-ci-internal-secret-over-thirty-two-characters
+          DATABASE_URL: sqlite:////tmp/notochat-http-registry.db
+          TENANT_SQLITE_DIR: /tmp/notochat-http-tenants
+          SEED_SAMPLE_DATA: '0'
+          APP_TOKEN: disposable-ci-legacy-token
+          NOTOCHAT_DISPOSABLE_STACK: '1'
+        run: |
+          npm run auth:migrate --prefix frontend
+          uvicorn server:app --app-dir backend --host 127.0.0.1 --port 18000 > /tmp/notochat-backend.log 2>&1 &
+          backend_pid=$!
+          npm run dev --prefix frontend -- --port 18030 > /tmp/notochat-frontend.log 2>&1 &
+          frontend_pid=$!
+          trap 'kill "$backend_pid" "$frontend_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18000/health >/dev/null && curl --fail --silent http://localhost:18030/ >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = 1
+          node scripts/http-smoke.mjs

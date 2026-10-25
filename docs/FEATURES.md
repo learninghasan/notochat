@@ -32,6 +32,8 @@ Reference reviewed: https://www.aipraktor.com/. Updated 25 October 2026. This do
 - Automated Python tests cover the business workflows, isolation, permissions, signed callbacks, credit and shipping idempotency, confirmation-gated sales, push payload privacy, PDF extraction, semantic retrieval, export and backup authentication.
 - JavaScript tests cover real Better Auth handler flows, signed identities, browser-demo invariants and invoice escaping.
 - Disposable PostgreSQL checks cover schema/channel isolation, concurrent stock/booking requests, concurrent payment callbacks, concurrent broadcast confirmation/worker delivery, account migrations/signup and encrypted backup archive round-trip.
+- Real local HTTP verification covers signup, the signed frontend/backend proxy, support replies, order/stock/idempotency, export, business isolation, stale-business rejection and logout using disposable data. This does not verify browser UI.
+- GitHub Actions runs frontend tests/build and backend tests/PostgreSQL checks; the first remote run passed.
 - A production Next.js build passes. Current suite: 68 Python tests and 15 JavaScript tests.
 - **Not performed:** browser UI/device testing, live Meta/OpenAI/courier/payment/SMTP tests, deployment of the backend/worker/database or a verified live Vercel deployment.
 
