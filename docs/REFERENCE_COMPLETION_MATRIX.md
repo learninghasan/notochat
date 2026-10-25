@@ -114,3 +114,13 @@ source corrections, approval proposals, customer/reorder drafts, delivery rules 
 observed sales/cost reporting are implemented. Synthetic Peoniara demo is separate
 from actual store data. Domain/sender/backend/provider activation remains pending;
 no reseller hierarchy, unapproved prices or extra proposed features were added.
+
+## Approved website-catalog sync extension
+
+User approved Peoniara website products appearing directly in NotoChat. Read-only
+public Store API snapshot sync, tenant isolation, provenance, stale/failure handling,
+listing recheck and Website catalog UI are implemented. The demo ships a timestamped
+verified public snapshot separate from synthetic inventory. Numeric stock and
+address-specific delivery quotes are not public; native checkout against store
+inventory remains blocked on an approved authoritative integration. See
+[WEBSITE_CATALOG_SYNC.md](WEBSITE_CATALOG_SYNC.md). No website writes or periodic jobs.
