@@ -6,6 +6,10 @@
 
 Business signup/login, verified invitations, membership removal, owner/member permissions, isolated business storage, encrypted per-business channel settings and durable background draft jobs are implemented. See [account and worker setup](docs/ACCOUNTS_AND_JOBS.md) before deployment. Use `uvicorn server:app` for account-backed requests.
 
+## New: automatic sales, merchant services and device support
+
+Opt-in grounded sales replies and confirmation-gated COD orders, explicit courier booking/status sync, server-verified hosted recharge and credit ledger, PWA/push, channel/assigned-chat scopes, PDF/semantic knowledge, invoice printing, export/audit and encrypted backup tools are implemented. Read [service configuration and limits](docs/SALES_PAYMENTS_AND_DELIVERY.md). These require hosted services/provider credentials and live verification; the whole reference product is not claimed complete.
+
 ## What you can use
 
 - Inbox across sample channels, human takeover, reasons/assignment, timed return on refresh, customer history and acknowledged notifications.
@@ -63,7 +67,7 @@ To use server persistence, deploy FastAPI to an ASGI host with a durable Postgre
 
 Set OPENAI_API_KEY and OPENAI_MODEL on the backend. Choose a current account-supported Responses API model with image input if using image analysis. Set OPENAI_TRANSCRIBE_MODEL separately for speech-to-text. No model is silently assumed.
 
-Copilot output always needs review. It cannot automatically create orders, verify payment, issue refunds or change stock. Media is limited to 8 MB, sent to the configured AI provider and not saved as a file. Provider token usage is recorded; BDT costs are unknown until pricing is configured. Live model quality has not been evaluated without credentials.
+Copilot output needs review. The separate opt-in sales workflow can create a COD order only after the customer confirms displayed details with an exact expiring code; it cannot issue refunds or book couriers autonomously. Media is limited to 8 MB, sent to the configured AI provider and not saved as a file. Provider token usage is recorded; BDT costs are unknown until pricing is configured. Live model quality has not been evaluated without credentials. Production uses APP_ENV=production and enforces funded AI credits/pricing.
 
 ## Official Meta setup
 
@@ -73,7 +77,7 @@ Copilot output always needs review. It cannot automatically create orders, verif
 4. Subscribe approved Messenger/Instagram message and Facebook comment events, or WhatsApp message events. Signed events are deduplicated and create real conversations in the inbox. Attachments currently show a placeholder directing the operator to the original channel.
 5. Keep ENABLE_LIVE_SEND=0 until you verify app permissions and real inbound events. Set it to 1 to allow an authenticated human operator to explicitly deliver a saved team reply.
 
-Only a verified recent Meta inbound event qualifies a chat for live text sending. Local test messages cannot open that gate. A conservative 23-hour window is used; template messaging is not implemented. An unconfirmed transport attempt cannot be blindly retried, to avoid duplicate messages. Comment replies, private replies and automatic AI sending are not implemented.
+Only a verified recent Meta inbound event qualifies a chat for live text sending. Local test messages cannot open that gate. A conservative 23-hour window is used; template messaging is not implemented. An unconfirmed transport attempt cannot be blindly retried, to avoid duplicate messages. Comment/private-reply transport is not implemented. Opt-in automatic sales text replies use the bounded worker flow described in the service setup document.
 
 Official references checked: [Messenger send API](https://developers.facebook.com/docs/messenger-platform/send-messages/), [webhooks](https://developers.facebook.com/docs/messenger-platform/webhooks/), [WhatsApp messages](https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages).
 
@@ -101,4 +105,4 @@ Tests cover stock atomicity/idempotency, order transitions, booking overlap/remi
 
 ## Deployment limits
 
-External courier/payment integrations, per-channel access control, push notifications, autonomous AI sales workflows and production operations remain unfinished. Directory entries are profiles; real account members/invitations are managed separately with Better Auth; advance amounts are unverified; reminder/broadcast entries are drafts. Database schema creation is additive via SQLAlchemy create_all; managed migration/rollback and backup procedures are still required. Review [FEATURES.md](docs/FEATURES.md) before onboarding real businesses.
+Core courier/recharge adapters, channel access, push and bounded automatic sales are implemented but require configuration and live verification. Advanced reference features and production operations remain unfinished; see the current feature map. Directory entries are profiles; real account members/invitations are managed separately with Better Auth; advance amounts are unverified; reminder/broadcast entries are drafts. Database schema creation is additive via SQLAlchemy create_all; managed migration/rollback and backup procedures are still required. Review [FEATURES.md](docs/FEATURES.md) before onboarding real businesses.

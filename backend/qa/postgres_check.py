@@ -18,9 +18,9 @@ client=TestClient(gateway)
 prefix=uuid.uuid4().hex
 orgA='qa_A_'+prefix;orgB='qa_B_'+prefix
 
-def call(org,method,path,body=None):
+def call(org,method,path,body=None,role="owner"):
     raw=json.dumps(body).encode() if body is not None else b''
-    p={'organization_id':org,'user_id':'qa_owner','role':'owner','method':method,'path':path,'body_sha256':hashlib.sha256(raw).hexdigest(),'timestamp':int(time.time()),'nonce':str(uuid.uuid4())}
+    p={'organization_id':org,'user_id':'qa_owner','role':role,'method':method,'path':path,'body_sha256':hashlib.sha256(raw).hexdigest(),'timestamp':int(time.time()),'nonce':str(uuid.uuid4())}
     encoded=base64.urlsafe_b64encode(json.dumps(p).encode()).decode().rstrip('=')
     return client.request(method,path,content=raw,headers={'Content-Type':'application/json','X-NotoChat-Identity':encoded,'X-NotoChat-Signature':hmac.new(secret.encode(),encoded.encode(),hashlib.sha256).hexdigest()})
 
@@ -43,3 +43,36 @@ booking={'conversation_id':c['id'],'customer':'QA buyer','service':'Consultation
 with ThreadPoolExecutor(max_workers=2) as pool:bookings=list(pool.map(lambda _:call(orgA,'POST','/bookings',booking),range(2)))
 assert sorted(r.status_code for r in bookings)==[200,409],[r.text for r in bookings]
 print('PASS: real PostgreSQL schema isolation, concurrent stock reservation, idempotency and booking serialization')
+
+# JSON-based channel scopes also run against PostgreSQL, not only SQLite.
+private=call(orgA,'POST','/conversations',{'customer':'Hidden WhatsApp contact','channel':'WhatsApp'}).json()
+policy=call(orgA,'PUT','/access/policies/qa_owner',{'channels':['Website'],'assigned_only':False})
+assert policy.status_code==200,policy.text
+scoped=call(orgA,'GET','/conversations',role='member')
+assert scoped.status_code==200,scoped.text
+assert all(x['channel']=='Website' for x in scoped.json())
+assert call(orgA,'GET',f"/conversations/{private['id']}/messages",role='member').status_code==404
+
+# Two concurrent verified callbacks cannot post a credit twice.
+from sqlalchemy.orm import Session
+from main import Base
+import httpx
+os.environ['SSLCOMMERZ_STORE_ID']='qa-store';os.environ['SSLCOMMERZ_STORE_PASSWORD']='qa-password'
+Record=Base.WorkspaceRecord
+business_app=gateway.workspace(orgA)
+with Session(business_app.state.engine) as s:
+    s.add(Record(id='payment:qa-credit',kind='payments',data={'expected_paisa':1000,'status':'pending','sandbox':True}));s.commit()
+class Response:
+    def raise_for_status(self):pass
+    def json(self):return {'tran_id':'qa-credit','val_id':'qa-val','status':'VALID','amount':'10.00','currency':'BDT','risk_level':'0'}
+class ProviderClient:
+    def __init__(self,**kwargs):pass
+    async def __aenter__(self):return self
+    async def __aexit__(self,*args):pass
+    async def get(self,*args,**kwargs):return Response()
+httpx.AsyncClient=ProviderClient
+with ThreadPoolExecutor(max_workers=2) as pool:
+    callbacks=list(pool.map(lambda _:client.post('/business/'+orgA+'/payments/ipn',content='val_id=qa-val'),range(2)))
+assert all(r.status_code==200 for r in callbacks),[r.text for r in callbacks]
+assert call(orgA,'GET','/billing').json()['sandbox_balance']==10
+print('PASS: PostgreSQL channel scopes and concurrent credit callback idempotency')

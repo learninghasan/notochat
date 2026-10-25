@@ -1,52 +1,37 @@
-# NotoChat implementation map
+# NotoChat: current reference comparison
 
-Reference: https://www.aipraktor.com/ (reviewed 25 October 2026). Implementations are original; this is a functional comparison, not a copy of the reference brand or site.
+Reference reviewed: https://www.aipraktor.com/. Updated 25 October 2026. This document describes implemented behavior, not claims that live providers were tested.
 
-## Account / worker increment
+| Capability | Current implementation | Boundary / remaining verification |
+|---|---|---|
+| Business accounts | Better Auth signup/login, email verification/reset, organizations, verified invitations and membership revocation | Hosted auth database and SMTP delivery need configuration/live tests |
+| Business isolation | Separate PostgreSQL schema per organization; separate SQLite files for development; signed/replay-protected API identities | Operational migrations, tenant deletion and key rotation are unfinished |
+| Team access | Owner/admin mutation controls, channel allowlists, assigned-chat-only scopes enforced on request sessions | Policies apply to channels, not multiple individual pages within a channel |
+| Unified inbox | Conversation history, official Meta signed message/comment ingestion, isolated website chat sessions | OAuth onboarding, multi-page management, attachment download and comment/private-reply transport pending |
+| Catalog | SKU, category, size, stock, price, description and HTTPS image URLs | Rich product carousels and visual catalog indexing pending |
+| AI sales | Opt-in background intent classification with validated structured output; catalog-grounded price/stock/policy replies; language/tone variants | Requires actual provider/model and worker; replies are bounded templates rather than unrestricted model prose |
+| Automatic checkout | One-item order proposal, displayed total/address, expiring confirmation code, exact customer confirmation, stock/price recheck and idempotent order creation | Multiple-item autonomous checkout and voice-to-confirmed-order flow pending |
+| Human handover | Complaints/refund keywords and uncertain intents hand over; reason, assignee user ID, notifications and timed return | Complaint recognition uses conservative keywords plus AI intent; refunds are never issued automatically |
+| Voice / image analysis | Uploaded voice transcription and image/catalog candidate analysis via configured AI provider | Automatic Meta attachment processing, exact/perceptual image indexing and measured Bengali quality pending |
+| Orders / receipts | Stock reservation/restoration, transitions, JSON receipts and escaped printable invoice with browser Save as PDF | Branded server-rendered PDF and invoice email delivery pending |
+| Courier | Explicit Steadfast and Pathao merchant booking, duplicate-attempt protection, authenticated status sync and webhook-triggered provider reconciliation | Contracts checked against published SDKs, not live merchant accounts; Pathao sandbox is default; live booking opt-in required |
+| Leads | Six-stage pipeline, temperature, next-contact dates and AI lead extraction draft | Lead extraction still requires operator review/save |
+| Bookings | Resource overlap checks, request/confirm/cancel/complete and reminder drafts | Automatic reminder sending is not implemented |
+| Knowledge | Text/Markdown/PDF extraction, keyword search, optional embedding indexing and cited semantic passages | Scanned PDF OCR pending; vector search currently uses bounded stored vectors, not a dedicated vector index |
+| Agent desk | Language, tone, business rules, delivery/return policies; draft/publish/restore versions; draft/autoreply opt-ins | Natural-language rule editing and a dedicated agent test console pending |
+| Follow-ups / broadcasts | Durable reminder preparation, execution-time reply-window checks, recent-audience broadcast preview | Customer-facing automatic follow-up/review/broadcast sending and consent/template management pending |
+| Billing / recharge | SSLCommerz hosted recharge, server-side amount/currency/status/risk validation, duplicate-safe integer-paisa ledger, token-based charging, low-credit notification and resume of credit-blocked jobs | Store credentials, prices and live gateway tests required; sandbox balance cannot fund real AI; direct bKash/Nagad APIs not implemented |
+| PWA / push | Manifest/icon, installable shell, offline fallback without customer-data caching, opt-in device subscriptions and worker-driven generic push | VAPID configuration and real device testing required; removed members' subscriptions need lifecycle cleanup; Chrome copilot extension pending |
+| Analytics | Record-derived ownership/order/lead/booking counts and provider token usage | Ownership is not AI-resolution rate; response-time metrics pending |
+| Data / audit | Owner export excludes credentials/tokens; business-scoped audit of successful account mutations/exports | Audit sink failures are best effort; automated tenant/account deletion and retention jobs pending |
+| Backups | Streaming authenticated encryption, SQLite snapshots, PostgreSQL custom archive backup, authenticated decryption and nightly scheduler script | Install scheduler/pg_dump and store backups durably/offsite; automatic restore verification and retention management pending |
 
-See [ACCOUNTS_AND_JOBS.md](ACCOUNTS_AND_JOBS.md). Implemented since the original table below: Better Auth signup/login/reset, organizations and verified invitations, current membership/role enforcement, separate business schemas/files, signed proxy identities with replay protection, encrypted per-business channel settings/public callbacks and durable background draft preparation. Backend callback and job paths are tested; live provider/email delivery and browser UI verification remain pending.
+## Verification
 
-## Original workspace increment
+- Automated Python tests cover the business workflows, isolation, permissions, signed callbacks, credit and shipping idempotency, confirmation-gated sales, push payload privacy, PDF extraction, semantic retrieval, export and backup authentication.
+- JavaScript tests cover real Better Auth handler flows, signed identities, browser-demo invariants and invoice escaping.
+- Disposable PostgreSQL checks cover schema/channel isolation, concurrent stock/booking requests, concurrent payment callbacks, account migrations/signup and encrypted backup archive round-trip.
+- A production Next.js build passes.
+- **Not performed:** browser UI/device testing, live Meta/OpenAI/courier/payment/SMTP tests, deployment of the backend/worker/database or a verified live Vercel deployment.
 
-| Feature | Browser demo | FastAPI backend | External verification |
-|---|---|---|---|
-| Unified inbox: Messenger, Instagram, WhatsApp, comments, Website | Seeded sample conversations | Persisted conversation storage; signed Meta message/comment ingestion; website widget | Meta credentials and permissions required |
-| Human handover, reason, assignment, timed return | Works on workspace reads | Works on workspace reads | Background timer worker not implemented |
-| Persistent notifications and acknowledgement | Implemented | Implemented | Phone/web push not implemented |
-| Catalog: SKU, category, descriptions, sizes, images, price, stock | Create/edit/search | Create/edit/search with unique non-empty SKU | Images are merchant-supplied HTTPS URLs |
-| Order capture, totals, stock reservation | Implemented | Transactional stock checks; idempotent order requests | Courier and payment are not automatic |
-| Order lifecycle & cancellation | Manual statuses, stock restoration | Locked transitions, stock restoration | Tracking references are manually recorded |
-| Receipts | JSON download | Receipt endpoint | Branded PDF/invoice emails pending |
-| Lead pipeline | Six stages, temperatures, next contact | Persisted lead upsert/update | AI extraction returns a reviewable draft, not an automatic save |
-| Bookings | Conflict checks, confirm/cancel/complete | Overlap checks serialized on Postgres | Advance amounts and transaction IDs are unverified |
-| Booking reminders | Drafts at 24h / 2h when in future | Same | Background execution/sending pending |
-| Knowledge base | Text/Markdown import, save/search/delete | CRUD and Unicode keyword search | PDF ingestion, vector retrieval/embeddings pending |
-| Agent rules | Language, tone, delivery, return/review settings | Same, server-side validation | Rules only affect connected assistant calls |
-| Agent versions | Draft, publish, restore previous | Same | Natural language rule editing / test suite pending |
-| AI copilot | Explicitly unavailable without provider | Customer summary, Q&A, reply draft, lead-extraction draft | OpenAI key and account-supported model required |
-| Image recognition | Explicitly unavailable | Vision input plus catalog candidates, human review required | Model compatibility and matching accuracy need real tests |
-| Voice transcription | Explicitly unavailable | Audio transcription; result shown for review | Transcription model and real Bengali audio tests required |
-| Reply delivery | Browser-only persistence | Explicit text send for signed inbound Meta conversations; default disabled; duplicate-send guard | App permission review and live send/receipt tests pending |
-| Follow-ups / reviews / delivery reminders | Draft scheduling, window eligibility | Same | Transport worker and platform opt-in/template requirements pending |
-| Broadcasts | 23h audience preview, zero sent | Same | Batch delivery, consent and template handling pending |
-| Analytics | Derived from saved records | Derived from saved records | Ownership is not an AI-resolution metric; payments not verified |
-| Team directory | Profiles and intended channels | Profiles and intended channels | No invitations, individual login or role enforcement |
-| Billing | No fabricated balance or charges | Actual provider token usage recorded; cost unknown | Credit ledger, pricing, top-ups and verified payment webhooks pending |
-| Website widget | Dashboard preview data only | Real iframe chat; expiring isolated session tokens; admin token never exposed | Enable on a durable backend and configure allowed origins |
-
-## Explicitly unfinished reference capabilities
-
-1. Multi-business signup, separate accounts, invitation acceptance, business isolation and owner/admin/member mutation permissions are implemented in account mode. Channel-specific and assigned-chat-only permissions remain unfinished; the legacy admin-token workspace is separate.
-2. Fully automatic AI sales agent: customer intent, product carousels, tool-based order creation with customer confirmation, automatic escalation, bounded autonomous actions and safety evaluation.
-3. Image code/exact/perceptual matching pipeline and voice-to-validated-order flow.
-4. Meta OAuth onboarding, multi-page token lifecycle, attachment download, comment replies/private replies, account health and delivery receipts.
-5. Pathao/Steadfast courier booking and verified tracking webhooks.
-6. Durable background preparation jobs, leases, retries, scheduled reminder checks and worker-driven handover expiry are implemented. Automatic delivery, daily encrypted backups and operational monitoring remain unfinished.
-7. Verified bKash/Nagad/bank recharge, usage pricing, real credit ledger, low-balance email and billing-gated automatic processing.
-8. Browser push, installable PWA and Meta Business Suite Chrome copilot extension.
-9. PDF/document extraction, embeddings, semantic retrieval, catalog visual indexing and measured language-quality evaluations.
-10. Password reset and encrypted per-business channel credentials are implemented. Tenant deletion/export controls, retention jobs, operational schema migration/rollback, audit trails, key rotation and full account recovery operations remain unfinished.
-
-These items are **not represented as completed just because a menu exists**. Missing credentials block external verification; the other items still require implementation. The UI labels unavailable functions and draft-only workflows accordingly.
-
-The original table describes the earlier workspace increment. The account/worker document above supersedes its older single-workspace, invitation and background-preparation limitations. No fully autonomous sales or live courier/payment integration is claimed.
+Core code is considerably broader than the initial demo. This does **not** mean every capability advertised by the reference product is complete. Remaining items in the right column still need code or real-service setup as indicated.

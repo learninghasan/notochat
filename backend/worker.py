@@ -15,7 +15,9 @@ async def tick():
         except Exception:logging.exception('Business workspace initialization failed')
     total=0
     for app in apps:
-        try:total+=len(await app.state.run_jobs())
+        try:
+            total+=len(await app.state.run_jobs())
+            await asyncio.to_thread(app.state.flush_push)
         except Exception:logging.exception('Workspace job processing failed')
     return total
 
@@ -24,7 +26,7 @@ async def main(once=False):
     while True:
         count=await tick()
         if once:
-            print(f'Processed {count} draft jobs. No customer messages sent.');return
+            print(f'Processed {count} jobs. Delivery follows the configured workspace settings.');return
         await asyncio.sleep(5)
 
 

@@ -106,3 +106,43 @@ def test_credentials_encrypted_and_public_business_callbacks_are_isolated(gatewa
     session=c.post('/business/org_A/widget/sessions',json={'name':'Visitor A'}).json()
     assert 'token' in session
     assert c.get('/business/org_B/widget/messages',headers={'Authorization':'Bearer '+session['token']}).status_code==503
+
+
+def test_member_channel_scope_filters_lists_direct_ids_orders_and_workspace(gateway):
+    c,_=gateway
+    a=call(c,'scope_org','POST','/conversations',{'customer':'Messenger customer','channel':'Messenger'}).json()
+    b=call(c,'scope_org','POST','/conversations',{'customer':'Private WhatsApp customer','channel':'WhatsApp'}).json()
+    p=call(c,'scope_org','POST','/products',{'name':'Product','stock':5,'price':100}).json()
+    order=call(c,'scope_org','POST','/orders',{'conversation_id':b['id'],'customer':'Secret','phone':'01700000000','address':'Private address','items':[{'product_id':p['id'],'quantity':1}],'request_id':'private-order'}).json()
+    assert call(c,'scope_org','PUT','/access/policies/user_test',{'channels':['Messenger'],'assigned_only':False}).status_code==200
+    chats=call(c,'scope_org','GET','/conversations',role='member').json()
+    assert [x['id'] for x in chats]==[a['id']]
+    assert call(c,'scope_org','GET',f"/conversations/{b['id']}/messages",role='member').status_code==404
+    assert call(c,'scope_org','GET','/orders/'+order['id']+'/receipt',role='member').status_code==404
+    assert call(c,'scope_org','GET','/workspace',role='member').json()['orders']==[]
+    assert call(c,'scope_org','GET','/access/policies',role='member').status_code==403
+
+
+def test_assigned_only_scope_uses_account_user_id_not_display_name(gateway):
+    c,_=gateway
+    a=call(c,'assigned_org','POST','/conversations',{'customer':'Assigned customer','channel':'Messenger'}).json()
+    call(c,'assigned_org','POST',f"/conversations/{a['id']}/handover",{'assignee':'Display name','assignee_user_id':'user_test','reason':'Assigned','duration_minutes':0})
+    call(c,'assigned_org','PUT','/access/policies/user_test',{'channels':['Messenger'],'assigned_only':True})
+    assert len(call(c,'assigned_org','GET','/conversations',role='member').json())==1
+    call(c,'assigned_org','POST',f"/conversations/{a['id']}/handover",{'assignee':'user_test','assignee_user_id':'someone_else','reason':'Reassigned','duration_minutes':0})
+    assert call(c,'assigned_org','GET','/conversations',role='member').json()==[]
+
+
+def test_export_excludes_secrets_and_audit_is_business_scoped(gateway,monkeypatch):
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv('CREDENTIAL_ENCRYPTION_KEY',Fernet.generate_key().decode())
+    c,_=gateway
+    call(c,'export_A','PUT','/connections/configuration',{'app_secret':'must-never-export'})
+    call(c,'export_A','POST','/conversations',{'customer':'Exported customer'})
+    exported=call(c,'export_A','GET','/workspace/export')
+    assert exported.status_code==200 and 'Exported customer' in exported.text
+    assert 'must-never-export' not in exported.text and 'ciphertext' not in exported.text
+    assert call(c,'export_A','GET','/workspace/export',role='member').status_code==403
+    audit=call(c,'export_A','GET','/audit').json()
+    assert any(e['path']=='/conversations' for e in audit)
+    assert call(c,'export_B','GET','/audit').json()==[]

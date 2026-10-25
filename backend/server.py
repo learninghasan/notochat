@@ -12,6 +12,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from main import app as legacy_app, engine as registry_engine, create_workspace
 
 metadata=MetaData()
 registry=Table('notochat_business_registry',metadata,Column('organization_id',String(200),primary_key=True),Column('namespace',String(80),unique=True,nullable=False))
+audit=Table('notochat_audit_events',metadata,Column('id',String(40),primary_key=True),Column('organization_id',String(200),index=True),Column('user_id',String(200)),Column('method',String(10)),Column('path',String(500)),Column('status',String(10)),Column('created_at',Float))
 nonces=Table('notochat_identity_nonces',metadata,Column('nonce',String(100),primary_key=True),Column('expires_at',Float,nullable=False))
 
 
@@ -81,6 +83,10 @@ class BusinessGateway:
             app=self.factory(tenant_engine,trusted_identity=True,seed_sample=False)
             if self.engine.dialect.name=='sqlite':
                 (self.sqlite_dir/(namespace+'.db')).chmod(0o600)
+            def read_audit():
+                with self.engine.connect() as connection:
+                    return [dict(row) for row in connection.execute(select(audit).where(audit.c.organization_id==organization_id).order_by(audit.c.created_at.desc()).limit(100)).mappings()]
+            app.state.audit_events=read_audit
             self.cache[organization_id]=app
             if len(self.cache)>32:self.cache.popitem(last=False)
             return app
@@ -89,7 +95,7 @@ class BusinessGateway:
         if scope['type']!='http':return await self.legacy(scope,receive,send)
         request=Request(scope,receive=receive)
         headers=request.headers
-        public=re.fullmatch(r'/business/([A-Za-z0-9_-]{1,200})(/webhooks/meta|/widget(?:/sessions|/messages)?)',scope['path'])
+        public=re.fullmatch(r'/business/([A-Za-z0-9_-]{1,200})(/webhooks/(?:meta|courier)|/widget(?:/sessions|/messages)?|/payments/(?:ipn|return))',scope['path'])
         if public:
             organization_id,child_path=public.groups()
             with self.engine.connect() as c:known=c.execute(select(registry.c.organization_id).where(registry.c.organization_id==organization_id)).first()
@@ -116,7 +122,17 @@ class BusinessGateway:
             nonlocal consumed
             if not consumed:consumed=True;return {'type':'http.request','body':body,'more_body':False}
             return await receive()
-        await child(child_scope,buffered_receive,send)
+        status=[500]
+        async def observed_send(message):
+            if message['type']=='http.response.start':status[0]=message['status']
+            await send(message)
+        await child(child_scope,buffered_receive,observed_send)
+        if (scope['method'] not in ('GET','HEAD') or scope['path']=='/workspace/export') and 200<=status[0]<300:
+            def record_audit():
+                with self.engine.begin() as connection:connection.execute(insert(audit).values(id=uuid.uuid4().hex,organization_id=principal['organization_id'],user_id=principal['user_id'],method=scope['method'],path=scope['path'][:500],status=str(status[0]),created_at=time.time()))
+            try:await asyncio.to_thread(record_audit)
+            except Exception:pass  # A failed audit sink must not repeat an already-committed mutation.
+
 
 
 app=BusinessGateway(legacy_app,registry_engine,create_workspace)

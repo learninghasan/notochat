@@ -12,3 +12,6 @@ tenant-data/
 *.db-wal
 *.sqlite
 *.sqlite3
+*.ncb
+*.partial-*
+backups/

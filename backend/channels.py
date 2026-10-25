@@ -75,7 +75,7 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
             r=s.get(Record,mapping)
             if r:c=s.get(Conversation,r.data['conversation_id'])
             else:
-                c=Conversation(customer=e['channel']+' customer '+e['sender'][-6:],channel=e['channel'],mode='human');s.add(c);s.flush()
+                c=Conversation(customer=e['channel']+' customer '+e['sender'][-6:],channel=e['channel'],mode='ai' if (s.get(Record,'agent:live') and s.get(Record,'agent:live').data.get('auto_reply')) else 'human');s.add(c);s.flush()
                 put(s,'channel',mapping,{'conversation_id':c.id,'sender':e['sender'],'account':e['account'],'channel':e['channel']})
             try:t=datetime.fromtimestamp(float(e['timestamp']),timezone.utc)
             except (ValueError,OverflowError,OSError):t=datetime.now(timezone.utc)-timedelta(days=2)
@@ -94,12 +94,12 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
             except IntegrityError:s.rollback()  # Concurrent webhook retry; unique provider event wins once.
         return {'received':True,'stored':count,'auto_replied':False}
 
-    @app.post('/conversations/{cid}/deliver',dependencies=[Depends(authorize)])
-    async def deliver(cid:int,body:DeliveryInput,s:Session=Depends(session)):
+    async def send_message(cid,body,s,automated=False):
         if configuration().get('ENABLE_LIVE_SEND')!='1':raise HTTPException(503,'Live delivery is disabled. Configure and verify the official channel, then explicitly enable it.')
         c=s.get(Conversation,cid)
         if not c:raise HTTPException(404,'Conversation not found')
-        if c.mode!='human':raise HTTPException(409,'Take over before delivering a team reply')
+        if automated and c.mode!='ai':raise HTTPException(409,'Human takeover stopped automatic delivery')
+        if c.mode!='human' and not automated:raise HTTPException(409,'Take over before delivering a team reply')
         message=s.get(Message,body.message_id)
         if not message or message.conversation_id!=cid or message.role!='team':raise HTTPException(404,'Team message not found')
         record=s.get(Record,f'conversation:{cid}')
@@ -134,3 +134,11 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
             raise HTTPException(502,'Delivery could not be confirmed. Check the original channel before retrying.')
         put(s,'delivery',rid,{'status':'sent','message_id':message.id,'conversation_id':cid,'provider_id':provider_id});s.commit()
         return s.get(Record,rid).data
+
+    @app.post('/conversations/{cid}/deliver',dependencies=[Depends(authorize)])
+    async def deliver(cid:int,body:DeliveryInput,s:Session=Depends(session)):
+        return await send_message(cid,body,s)
+
+    async def automated(cid,mid,s):
+        return await send_message(cid,DeliveryInput(message_id=mid),s,automated=True)
+    app.state.deliver_automated=automated

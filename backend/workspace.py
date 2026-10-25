@@ -111,6 +111,7 @@ class KnowledgeInput(BaseModel):
 
 class AgentInput(BaseModel):
     auto_draft: bool = False
+    auto_reply: bool = False
     language: Literal["Bangla", "English", "Auto"] = "Auto"
     tone: Literal["Friendly", "Professional", "Concise"] = "Friendly"
     instructions: str = Field(default="", max_length=10000)
@@ -129,6 +130,7 @@ class AgentInput(BaseModel):
 
 class Handover(BaseModel):
     assignee: str = Field(default="", max_length=160)
+    assignee_user_id: str = Field(default="",max_length=200)
     reason: str = Field(default="Manual takeover", max_length=1000)
     duration_minutes: int = Field(default=60, ge=0, le=10080)
 
@@ -198,9 +200,11 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     def put(s, kind, data, rid=None):
         rid = rid or f"{kind}:{secrets.token_hex(12)}"
         data = {**data, "id": rid}
+        if kind=="usage":data.setdefault("created_at",stamp())
         r = s.get(Record, rid)
         if r: r.data = copy.deepcopy(data)
         else: s.add(Record(id=rid, kind=kind, data=copy.deepcopy(data)))
+        if kind=="usage" and hasattr(app.state,"charge_usage"):app.state.charge_usage(s,data)
         return data
 
     def conv(s, cid):
@@ -209,7 +213,9 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         return c
 
     def notify(s, title, detail, cid=None):
-        return put(s, "notifications", {"title": title, "detail": detail, "conversation_id": cid, "created_at": stamp(), "done": False})
+        notification=put(s, "notifications", {"title": title, "detail": detail, "conversation_id": cid, "created_at": stamp(), "done": False})
+        if hasattr(app.state,"queue_push"):app.state.queue_push(s,notification)
+        return notification
 
     def meta(s, cid):
         r = s.get(Record, f"conversation:{cid}")
@@ -233,7 +239,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
                     c = s.get(Conversation, int(r.id.split(":")[1]))
                     if c:
                         c.mode = "ai"
-                        d.update(handover_until="", assignee="", reason="Takeover expired")
+                        d.update(handover_until="", assignee="", assignee_user_id="", reason="Takeover expired")
                         r.data = d
                         notify(s, "Returned to AI mode", c.customer, c.id)
                         changed = True
@@ -257,7 +263,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
 
     def clear_handover(s,cid):
         r=s.get(Record,f"conversation:{cid}")
-        if r:r.data={**r.data,"handover_until":"","assignee":"","reason":""}
+        if r:r.data={**r.data,"handover_until":"","assignee":"","assignee_user_id":"","reason":""}
     app.state.clear_handover=clear_handover
     app.state.expire_handovers=expire
 
@@ -266,7 +272,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     @app.get("/workspace", dependencies=protected)
     def workspace(s: Session = Depends(session)):
         expire(s)
-        return {"leads": records(s,"leads"), "orders": records(s,"orders"), "bookings": records(s,"bookings"), "knowledge": records(s,"knowledge"), "notifications": records(s,"notifications"), "automations": records(s,"automations"), "team": records(s,"team"), "broadcasts": records(s,"broadcasts"), "agent": get(s,"agent:live").data, "agent_versions": records(s,"agent_versions"), "deliveries":records(s,"delivery"), "assistant_drafts":records(s,"assistant_drafts"), "jobs":records(s,"jobs"), "conversation_meta": {str(c.id):meta(s,c.id) for c in s.scalars(select(Conversation))}}
+        return {"leads": records(s,"leads"), "orders": records(s,"orders"), "bookings": records(s,"bookings"), "knowledge": records(s,"knowledge"), "notifications": records(s,"notifications"), "automations": records(s,"automations"), "team": records(s,"team"), "broadcasts": records(s,"broadcasts"), "agent": get(s,"agent:live").data, "agent_versions": records(s,"agent_versions"), "deliveries":records(s,"delivery"), "assistant_drafts":records(s,"assistant_drafts"), "jobs":records(s,"jobs"), "shipments":records(s,"shipments"), "conversation_meta": {str(c.id):meta(s,c.id) for c in s.scalars(select(Conversation))}}
 
     @app.post("/products", dependencies=protected)
     def create_product(body: ProductInput, s: Session = Depends(session)):
@@ -438,7 +444,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     def handover(cid:int,body:Handover,s:Session=Depends(session)):
         c=conv(s,cid);c.mode="human"
         d=meta(s,cid)
-        d.update(assignee=body.assignee,reason=body.reason,handover_until=(now()+timedelta(minutes=body.duration_minutes)).isoformat() if body.duration_minutes else "")
+        d.update(assignee=body.assignee,assignee_user_id=body.assignee_user_id,reason=body.reason,handover_until=(now()+timedelta(minutes=body.duration_minutes)).isoformat() if body.duration_minutes else "")
         put(s,"conversation",d,f"conversation:{cid}")
         notify(s,"Team attention needed",body.reason,cid);s.commit();return d
 
@@ -493,6 +499,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         if not raw or len(raw)>8_000_000:raise HTTPException(422,"Use a file under 8 MB")
         if body.kind=="image" and not body.mime_type.startswith("image/"):raise HTTPException(422,"Image MIME type required")
         if body.kind=="audio" and not body.mime_type.startswith("audio/"):raise HTTPException(422,"Audio MIME type required")
+        app.state.require_credit(s,body.kind)
         key=os.getenv("OPENAI_API_KEY")
         model=os.getenv("OPENAI_MODEL" if body.kind=="image" else "OPENAI_TRANSCRIBE_MODEL")
         if not key or not model:raise HTTPException(503,"Configure the relevant AI model and API key on the backend")
@@ -529,16 +536,17 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         for channel in ("Messenger","Instagram","WhatsApp"):
             ready=bool(configured[channel] and channel in received and settings.get("ENABLE_LIVE_SEND")=="1")
             result.append({"name":channel,"configured":configured[channel],"ready":ready,"detail":"Official webhook and text delivery adapter implemented. Requires channel credentials, signed inbound verification and ENABLE_LIVE_SEND=1. Provider permissions need live end-to-end testing."})
-        result.extend([{"name":"Facebook comments","configured":bool(meta_base and settings.get("META_PAGE_ID")),"ready":False,"detail":"Signed comment ingestion implemented. Comment replies and private replies are not implemented."},{"name":"Steadfast","configured":False,"ready":False,"detail":"Courier API credentials and booking/status adapter not connected"},{"name":"Pathao","configured":False,"ready":False,"detail":"Merchant account and courier adapter not connected"},{"name":"bKash / Nagad","configured":False,"ready":False,"detail":"No payment collection or payment verification is enabled"}])
+        result.extend([{"name":"Facebook comments","configured":bool(meta_base and settings.get("META_PAGE_ID")),"ready":False,"detail":"Signed comment ingestion implemented. Comment replies and private replies are not implemented."},{"name":"Steadfast","configured":bool(settings.get("STEADFAST_API_KEY") and settings.get("STEADFAST_SECRET_KEY")),"ready":False,"detail":"Explicit booking and authenticated status adapter implemented. Merchant credentials and live verification required."},{"name":"Pathao","configured":all(settings.get(k) for k in ["PATHAO_CLIENT_ID","PATHAO_CLIENT_SECRET","PATHAO_USERNAME","PATHAO_PASSWORD"]),"ready":False,"detail":"Merchant booking/status adapter implemented; sandbox is the default. Live merchant verification required."},{"name":"Hosted recharge","configured":bool(os.getenv("SSLCOMMERZ_STORE_ID") and os.getenv("SSLCOMMERZ_STORE_PASSWORD")),"ready":False,"detail":"SSLCommerz hosted recharge with server-verified credit posting. Available payment methods depend on the merchant account; sandbox credits cannot fund real AI."}])
         return result
 
     @app.get("/billing", dependencies=protected)
     def billing(s:Session=Depends(session)):
-        return {"currency":"BDT","balance":None,"payments_connected":False,"usage":records(s,"usage"),"note":"Token usage only. No fabricated credits, pricing, top-ups or payment verification."}
+        return app.state.billing_snapshot(s)
 
     @app.post("/conversations/{cid}/assistant", dependencies=protected)
     async def assistant(cid:int,body:AssistantInput,s:Session=Depends(session)):
         c=conv(s,cid)
+        app.state.require_credit(s)
         key=os.getenv("OPENAI_API_KEY");model=os.getenv("OPENAI_MODEL")
         if not key or not model:raise HTTPException(503,"AI is not configured on the backend")
         context={"customer":c.customer,"messages":[{"role":m.role,"text":m.text[:1500]} for m in s.scalars(select(Message).where(Message.conversation_id==cid).order_by(Message.id))][-30:],"catalog":catalog("",s)[:100],"orders":[o for o in records(s,"orders") if o["conversation_id"]==cid],"knowledge":[{**d,"text":d["text"][:6000]} for d in records(s,"knowledge")[:8]],"business_rules":get(s,"agent:live").data}
@@ -555,5 +563,28 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         put(s,"usage",{"created_at":stamp(),"model":model,"action":body.action,"conversation_id":cid,"tokens":result.get("usage",{}),"cost_bdt":None});s.commit()
         return {"text":text,"requires_review":True}
 
+    from push import install_push
+    install_push(app,engine,Record,authorize,session,put)
+
+    from access import install_access
+    install_access(app,Record,Conversation,Message,authorize,session,put,tenant)
+
+    from billing import install_billing
+    install_billing(app,engine,Record,authorize,session,put,notify,records)
+
+    from data_controls import install_data_controls
+    install_data_controls(app,Record,Conversation,Message,Product,authorize,session,tenant)
+
+    from knowledge import install_knowledge
+    install_knowledge(app,Record,authorize,session,put)
+
+    from couriers import install_couriers
+    install_couriers(app,Record,authorize,session,put,notify)
+
+    from sales import install_sales
+    install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,create_order,OrderInput)
+
     from jobs import install_jobs
     install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,notify,expire,within_window,assistant,AssistantInput)
+
+    app.state.assistant=assistant

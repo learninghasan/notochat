@@ -1,5 +1,7 @@
 # Accounts, isolated businesses and background preparation
 
+This describes the account/worker increment. The later [sales/service setup](SALES_PAYMENTS_AND_DELIVERY.md) and [current feature map](FEATURES.md) supersede its older limitations about automatic sales, channel permissions, billing and push.
+
 ## Services
 
 Run the Next.js frontend, FastAPI gateway and a separate Python worker. Production requires durable PostgreSQL storage; browser demo remains independent and browser-local.

@@ -1,4 +1,4 @@
-"""Durable draft preparation. No job sends customer messages or verifies payments."""
+"""Durable preparation and explicitly enabled, bounded automatic sales jobs."""
 import copy
 from datetime import datetime,timezone,timedelta
 from fastapi import Depends,HTTPException
@@ -16,8 +16,8 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
 
     def queue_auto(s,cid,mid):
         c=s.get(Conversation,cid);live=s.get(Record,'agent:live')
-        if c and c.mode=='ai' and live and live.data.get('auto_draft',False):
-            return enqueue(s,'ai_draft',{'conversation_id':cid,'message_id':mid,'automatic':True},key='message-'+str(mid))
+        if c and c.mode=='ai' and live and (live.data.get('auto_draft',False) or live.data.get('auto_reply',False)):
+            return enqueue(s,'sales_agent' if live.data.get('auto_reply') else 'ai_draft',{'conversation_id':cid,'message_id':mid,'automatic':True},key='message-'+str(mid))
 
     app.state.enqueue=enqueue
     app.state.queue_auto_draft=queue_auto
@@ -78,7 +78,9 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
                 try:
                     payload=data['payload'];c=s.get(Conversation,payload['conversation_id'])
                     if not c:raise ValueError('Conversation no longer exists')
-                    if data['kind']=='reminder_prepare':
+                    if data['kind']=='sales_agent':
+                        output=await app.state.sales_respond(c.id,payload['message_id'],s)
+                    elif data['kind']=='reminder_prepare':
                         a=s.get(Record,payload['automation_id'])
                         if not a or a.kind!='automations':raise ValueError('Reminder no longer exists')
                         eligible=within_window(s,c.id)

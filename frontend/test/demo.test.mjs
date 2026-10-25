@@ -64,3 +64,9 @@ test('team directory is explicit about profiles rather than access enforcement',
  assert.match(t.access,/no invitation/);
  await assert.rejects(()=>post('/team',{name:'Agent 2',email:'agent@example.com',role:'Agent',channels:[]}),/already/);
 });
+
+test('invoice output escapes customer HTML and marks unverified payments',async()=>{
+ const {invoiceHtml}=await import('../lib/invoice.mjs');
+ const html=invoiceHtml({id:'order:test',items:[{name:'<script>alert(1)</script>',quantity:1,unit_price:100}],customer:'<img src=x onerror=alert(1)>',phone:'12345',address:'Address',total:170,delivery_charge:70,payment_method:'COD',status:'confirmed'});
+ assert.ok(!html.includes('<script>'));assert.ok(!html.includes('<img src=x'));assert.ok(html.includes('&lt;script&gt;'));assert.ok(html.includes('unverified'));
+});

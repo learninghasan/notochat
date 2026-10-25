@@ -61,7 +61,7 @@ def install_widget(app,engine,Record,Conversation,Message,session,configuration=
         if count>=20:raise HTTPException(429,'Too many new chats. Please try again later.')
         if rate:rate.data={'count':count+1}
         else:s.add(Record(id=bucket,kind='widget_rate',data={'count':1}))
-        c=Conversation(customer=body.name.strip(),channel='Website',mode='human');s.add(c);s.flush()
+        c=Conversation(customer=body.name.strip(),channel='Website',mode='ai' if (s.get(Record,'agent:live') and s.get(Record,'agent:live').data.get('auto_reply')) else 'human');s.add(c);s.flush()
         token=secrets.token_urlsafe(32)
         s.add(Record(id='widget:'+hashlib.sha256(token.encode()).hexdigest(),kind='widget',data={'conversation_id':c.id,'expires_at':(now+timedelta(hours=24)).isoformat(),'count':0}))
         s.add(Record(id=f'conversation:{c.id}',kind='conversation',data={'source':'website-widget','last_inbound':'','assignee':'','reason':'Website customer','handover_until':''}))
