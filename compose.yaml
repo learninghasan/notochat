@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: commerce
+      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_DB: commerce
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - commerce_data:/var/lib/postgresql/data
+volumes:
+  commerce_data:
