@@ -50,29 +50,36 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
         for entry in payload.get('entry',[])[:100]:
             for event in entry.get('messaging',[])[:100]:
                 page=str(event.get('recipient',{}).get('id',''))
-                expected_account=configuration().get('INSTAGRAM_ACCOUNT_ID') if payload.get('object')=='instagram' else configuration().get('META_PAGE_ID')
-                if page!=expected_account or not page:continue
+                channel='Instagram' if payload.get('object')=='instagram' else 'Messenger'
+                if not app.state.channel_account(channel,page):continue
                 message=event.get('message',{})
                 if message.get('is_echo') or not message.get('mid'):continue
-                events.append({'channel':'Instagram' if payload.get('object')=='instagram' else 'Messenger','sender':str(event.get('sender',{}).get('id','')),'account':page,'message_id':message['mid'],'text':message.get('text') or '[Attachment received; open in the original channel]','timestamp':event.get('timestamp',0)/1000})
+                events.append({'channel':'Instagram' if payload.get('object')=='instagram' else 'Messenger','sender':str(event.get('sender',{}).get('id','')),'account':page,'message_id':message['mid'],'text':message.get('text') or '[Attachment received; open in the original channel]','timestamp':event.get('timestamp',0)/1000,'attachments':message.get('attachments',[])[:3]})
             for change in entry.get('changes',[])[:100]:
                 value=change.get('value',{})
                 if change.get('field')=='messages':
                     phone=str(value.get('metadata',{}).get('phone_number_id',''))
-                    if not phone or phone!=configuration().get('WHATSAPP_PHONE_NUMBER_ID'):continue
+                    if not app.state.channel_account('WhatsApp',phone):continue
                     for m in value.get('messages',[])[:100]:
-                        events.append({'channel':'WhatsApp','sender':str(m.get('from','')),'account':phone,'message_id':m.get('id',''),'text':m.get('text',{}).get('body') or '[Media received; open in WhatsApp]','timestamp':float(m.get('timestamp',0))})
+                        events.append({'channel':'WhatsApp','sender':str(m.get('from','')),'account':phone,'message_id':m.get('id',''),'text':m.get('text',{}).get('body') or '[Media received; open in WhatsApp]','timestamp':float(m.get('timestamp',0)),'attachments':[{**m.get(m.get('type'),{}),'type':m.get('type')}] if m.get('type') in ('image','audio','video','document') else []})
                 if change.get('field')=='feed' and value.get('item')=='comment' and value.get('verb')=='add':
                     page=str(entry.get('id',''))
-                    if page and page==configuration().get('META_PAGE_ID'):
+                    if app.state.channel_account('Facebook comments',page):
                         events.append({'channel':'Facebook comments','sender':str(value.get('from',{}).get('id','')),'account':page,'message_id':value.get('comment_id',''),'text':value.get('message','[Comment]'),'timestamp':value.get('created_time',0)})
         count=0
         for e in events:
             if not e['sender'] or not e['message_id']:continue
-            dedup='inbound:'+hashlib.sha256((e['channel']+e['message_id']).encode()).hexdigest()
+            dedup='inbound:'+hashlib.sha256(json.dumps([e['channel'],e['account'],e['message_id']],separators=(',',':')).encode()).hexdigest()
+            legacy=s.get(Record,'inbound:'+hashlib.sha256((e['channel']+e['message_id']).encode()).hexdigest())
+            if legacy:
+                oldmeta=s.get(Record,f"conversation:{legacy.data['conversation_id']}")
+                if oldmeta and oldmeta.data.get('account')==e['account']:continue
             if s.get(Record,dedup):continue
-            mapping='channel:'+hashlib.sha256((e['channel']+e['account']+e['sender']).encode()).hexdigest()
+            mapping='channel:'+hashlib.sha256(json.dumps([e['channel'],e['account'],e['sender']],separators=(',',':')).encode()).hexdigest()
             r=s.get(Record,mapping)
+            if not r:
+                previous=s.get(Record,'channel:'+hashlib.sha256((e['channel']+e['account']+e['sender']).encode()).hexdigest())
+                if previous and all(previous.data.get(k)==e[k] for k in ('channel','account','sender')):r=previous
             if r:c=s.get(Conversation,r.data['conversation_id'])
             else:
                 c=Conversation(customer=e['channel']+' customer '+e['sender'][-6:],channel=e['channel'],mode='ai' if (s.get(Record,'agent:live') and s.get(Record,'agent:live').data.get('auto_reply')) else 'human');s.add(c);s.flush()
@@ -85,9 +92,11 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
             d=copy.deepcopy(meta.data) if meta else {}
             old=d.get('last_verified_inbound','')
             if not old or t.isoformat()>old:
-                d.update(last_inbound=t.isoformat(),last_verified_inbound=t.isoformat(),source='signed-meta-webhook',sender=e['sender'],account=e['account'],channel=e['channel'])
+                d.update(last_inbound=t.isoformat(),last_verified_inbound=t.isoformat(),source='signed-meta-webhook',sender=e['sender'],account=e['account'],channel=e['channel'],account_name=(app.state.channel_account(e['channel'],e['account']) or {}).get('account_name',e['account']))
                 put(s,'conversation',f'conversation:{c.id}',d)
             message=Message(conversation_id=c.id,role='customer',text=str(e['text'])[:8000]);s.add(message);s.flush()
+            put(s,'verified_message',f'verified_message:{message.id}',{'conversation_id':c.id,'message_id':message.id,'source':'signed-meta-webhook'})
+            app.state.ingest_attachments(s,c.id,message.id,e)
             app.state.queue_auto_draft(s,c.id,message.id)
             put(s,'inbound',dedup,{'conversation_id':c.id,'provider_id':e['message_id'],'created_at':datetime.now(timezone.utc).isoformat()})
             try:s.commit();count+=1
@@ -107,10 +116,12 @@ def install_channels(app,engine,Record,Conversation,Message,authorize,session,co
         d=record.data
         age=datetime.now(timezone.utc)-datetime.fromisoformat(d['last_verified_inbound'])
         if not timedelta(0)<=age<timedelta(hours=23):raise HTTPException(409,'Outside the conservative reply window. Template messaging is not implemented.')
-        version=configuration().get('META_GRAPH_VERSION','')
+        account_configuration=app.state.channel_account(c.channel,d.get('account',''))
+        if not account_configuration:raise HTTPException(409,'This conversation’s channel account is disconnected or disabled')
+        version=account_configuration.get('META_GRAPH_VERSION','')
         if not re.fullmatch(r'v\d+\.\d+',version):raise HTTPException(503,'Set a supported META_GRAPH_VERSION, for example the version configured on your Meta app')
         if c.channel not in ['Messenger','Instagram','WhatsApp']:raise HTTPException(409,'This channel does not support this text transport')
-        token=configuration().get('WHATSAPP_ACCESS_TOKEN') if c.channel=='WhatsApp' else (configuration().get('INSTAGRAM_ACCESS_TOKEN') or configuration().get('META_PAGE_ACCESS_TOKEN')) if c.channel=='Instagram' else configuration().get('META_PAGE_ACCESS_TOKEN')
+        token=account_configuration.get('WHATSAPP_ACCESS_TOKEN') if c.channel=='WhatsApp' else (account_configuration.get('INSTAGRAM_ACCESS_TOKEN') or account_configuration.get('META_PAGE_ACCESS_TOKEN')) if c.channel=='Instagram' else account_configuration.get('META_PAGE_ACCESS_TOKEN')
         if not token:raise HTTPException(503,'Channel access token is missing')
         if c.channel=='WhatsApp':payload={'messaging_product':'whatsapp','recipient_type':'individual','to':d['sender'],'type':'text','text':{'body':message.text}}
         else:payload={'recipient':{'id':d['sender']},'messaging_type':'RESPONSE','message':{'text':message.text}}

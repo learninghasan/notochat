@@ -4,7 +4,7 @@
 
 NotoChat is the chosen name for an online-business all-in-one messaging and sales app, based on the AIPraktor reference. The user requested Facebook, Instagram, WhatsApp and website conversations in one platform; natural AI customer replies and operator guidance; reference features implemented one by one; source in the existing `learninghasan/notochat` GitHub repository; and a usable Vercel deployment URL. They authorized continuing implementation and deployment, but no real customer outreach is used for tests.
 
-The actual feature-by-feature implementation and outstanding product work are in [FEATURES.md](FEATURES.md). This is not full feature parity or production readiness. In particular, multi-page support, attachment ingestion, rich product messages, multi-item/voice checkout, OCR, natural-language rule editing/test console, production migrations, retention/deletion and device-membership lifecycle still need work. Shipping the existing draft features does not resolve those gaps.
+The actual feature-by-feature implementation and outstanding product work are in [FEATURES.md](FEATURES.md). This is not full feature parity or production readiness. Following the next implementation increment, rich product messages, automatic voice/image checkout, OCR, natural-language rule editing/test console, production migrations, retention/deletion and device-membership lifecycle still need work. Multi-page support, bounded image/audio ingestion and multi-item text checkout are now implemented with the limits described below. Shipping the existing draft features does not resolve those gaps.
 
 ## Evidence reconciled
 
@@ -34,3 +34,13 @@ Reading commits, check runs and Actions run lists succeeds. Reading repository A
 - A real local Next.js development server and FastAPI gateway, with fresh disposable SQLite auth/tenant databases, passed `scripts/http-smoke.mjs`: signup, business creation, signed proxy, local support reply, order/stock/idempotency, export, second-business isolation, stale-business rejection and logout. No external providers or customer sends were used. This is HTTP integration verification, not browser interaction or production-host verification.
 - The same HTTP smoke test is now part of the backend CI job. The test refuses non-local origins and requires `NOTOCHAT_DISPOSABLE_STACK=1`. Local testing requires fresh disposable auth/database paths, the same trust secret on frontend/backend, `BACKEND_URL`, a migrated auth schema and servers on ports 18030/18000. Never point this test at customer data.
 - `next dev` generated `frontend/AGENTS.md`; it is retained as repository guidance. No production service or persistent provider credentials were provisioned.
+
+## Product-gap continuation
+
+[Scope evidence, behavior and limits](CART_PAGES_AND_MEDIA.md) records the original user quotations and the relevant reference text for all three pursued gaps.
+
+- Multi-product manual/automatic text checkout is implemented with strict cart validation, quoted-price/stock locking, atomic reservation, specific verified-message confirmation, expired/superseded code rejection and idempotent concurrent/recovery behavior.
+- Multiple same-app Meta pages retain distinct encrypted credentials. Recipient account determines ingestion/delivery, pause controls are independent, and member page/account scopes also protect histories, mutations and attachments.
+- Signed image/audio attachment ingestion is implemented with encrypted source locations, bounded/restricted downloads, explicit/opt-in background analysis and review drafts. Unsupported formats and voice/image-confirmed autonomous checkout remain outside this increment’s completion claim.
+- Aggregate local verification passed 105 Python tests, 18 JavaScript tests and production build. Disposable PostgreSQL checks exercise concurrent identical carts, page/settings mutations and media analysis claims in addition to previous isolation/concurrency coverage. All provider calls in these tests are mocked. Updated HTTP smoke/remote CI outcomes are reported with the pushed commit; no live provider or browser result is implied.
+- No new scope/approval question was necessary for these local extensions. Vercel writes remain unattempted; real provider configuration/sends and supported browser/device verification retain the previously documented boundaries. Remaining product work is implementation work, not falsely attributed to those deployment/browser dependencies.

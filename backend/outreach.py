@@ -27,6 +27,7 @@ def install_outreach(app,Record,Conversation,Message,authorize,session,put,notif
         except (ValueError,TypeError):return False,'Recent inbound timestamp is required'
         if not timedelta(0)<=age<timedelta(hours=23):return False,'Reply window has expired; template sending is not implemented'
         if marketing and not d.get('marketing_opt_in'):return False,'Recorded marketing consent is required'
+        if c.channel!='Website' and not app.state.channel_account(c.channel,d.get('account','')):return False,'Channel account is disconnected or disabled'
         if c.channel!='Website' and app.state.channel_configuration().get('ENABLE_LIVE_SEND')!='1':return False,'Live channel sending is disabled'
         return True,'Eligible now; eligibility will be checked again before sending'
 

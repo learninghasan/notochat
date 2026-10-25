@@ -1,13 +1,14 @@
 """Owner-managed channel/assignment scopes applied to every request session."""
 from fastapi import Depends,HTTPException
 from pydantic import BaseModel,Field
-from typing import Literal
+from typing import Literal,Annotated
 from sqlalchemy import select,event,or_,and_
 from sqlalchemy.orm import with_loader_criteria
 
 class Policy(BaseModel):
     channels:list[Literal['Messenger','Instagram','WhatsApp','Facebook comments','Website']]=Field(default_factory=list)
     assigned_only:bool=False
+    accounts:list[Annotated[str,Field(min_length=1,max_length=100,pattern=r'^[A-Za-z0-9_-]+$')]]|None=Field(default=None,max_length=100)
 
 
 def install_access(app,Record,Conversation,Message,authorize,session,put,tenant):
@@ -31,10 +32,12 @@ def install_access(app,Record,Conversation,Message,authorize,session,put,tenant)
         if not policy:return None  # Existing members retain organization-wide access until explicitly scoped.
         p=policy.data
         ids=list(s.scalars(select(Conversation.id).where(Conversation.channel.in_(p['channels']))))
+        if p.get('accounts') is not None:
+            ids=[cid for cid in ids if s.get(Conversation,cid).channel=='Website' or (s.get(Record,f'conversation:{cid}') and s.get(Record,f'conversation:{cid}').data.get('account') in p['accounts'])]
         if p['assigned_only']:
             ids=[cid for cid in ids if (s.get(Record,f'conversation:{cid}') and s.get(Record,f'conversation:{cid}').data.get('assignee_user_id')==principal['user_id'])]
         order_ids=[r.id for r in s.scalars(select(Record).where(Record.kind=='orders')) if r.data['conversation_id'] in ids]
-        scoped=['orders','leads','bookings','automations','assistant_drafts','sales','usage','delivery','channel','inbound','outreach']
+        scoped=['orders','leads','bookings','automations','assistant_drafts','sales','usage','delivery','channel','inbound','outreach','verified_message','checkout','attachments','private_attachment']
         condition=or_(
             and_(Record.kind.in_(scoped),Record.data['conversation_id'].as_integer().in_(ids)),
             and_(Record.kind=='conversation',Record.id.in_([f'conversation:{cid}' for cid in ids])),

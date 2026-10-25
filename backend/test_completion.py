@@ -45,11 +45,22 @@ def website(c,monkeypatch):
     return cid,{'Authorization':'Bearer '+token}
 
 
+def send_website(c,engine,headers,text):
+    # Advance only the synthetic session's rate-limit timestamp, never bypass auth.
+    import hashlib
+    with Session(engine) as s:
+        r=s.get(Base.WorkspaceRecord,'widget:'+hashlib.sha256(headers['Authorization'][7:].encode()).hexdigest())
+        r.data={**r.data,'last_sent':'2000-01-01T00:00:00+00:00'};s.commit()
+    result=c.post('/widget/messages',headers=headers,json={'text':text})
+    assert result.status_code==200,result.text
+    return result
+
+
 def test_automatic_sales_requires_exact_customer_confirmation_and_uses_catalog_prices(system,monkeypatch):
-    app,c,_=system
+    app,c,engine=system
     opt_in_sales(c);cid,wh=website(c,monkeypatch)
     monkeypatch.setenv('OPENAI_API_KEY','fake');monkeypatch.setenv('OPENAI_MODEL','test-model')
-    intent={'intent':'order','product_ids':[1],'quantity':2,'customer':'Rafi','phone':'01700000000','address':'House 7 Dhaka'}
+    intent={'intent':'order','product_ids':[1],'items':[{'product_id':1,'quantity':2}],'customer':'Rafi','phone':'01700000000','address':'House 7 Dhaka'}
     calls=mock_client(monkeypatch,post_result={'output':[{'content':[{'type':'output_text','text':json.dumps(intent)}]}],'usage':{'input_tokens':100,'output_tokens':30}})
     assert c.post('/widget/messages',headers=wh,json={'text':'2 Ivory Panjabi please. Rafi, 01700000000, House 7 Dhaka'}).status_code==200
     asyncio.run(app.state.run_jobs())
@@ -57,11 +68,11 @@ def test_automatic_sales_requires_exact_customer_confirmation_and_uses_catalog_p
     messages=c.get(f'/conversations/{cid}/messages',headers=H).json()
     code=re.search(r'CONFIRM ([A-F0-9]{6})',messages[-1]['text']).group(1)
     assert '5030' in messages[-1]['text']
-    c.post(f'/conversations/{cid}/incoming',headers=H,json={'text':'CONFIRM '+code})
+    send_website(c,engine,wh,'CONFIRM '+code)
     asyncio.run(app.state.run_jobs())
     orders=c.get('/workspace',headers=H).json()['orders'];assert len(orders)==1 and orders[0]['total']==5030
     assert c.get('/catalog',headers=H).json()[0]['stock']==10
-    c.post(f'/conversations/{cid}/incoming',headers=H,json={'text':'CONFIRM '+code})
+    send_website(c,engine,wh,'CONFIRM '+code)
     asyncio.run(app.state.run_jobs())
     assert len(c.get('/workspace',headers=H).json()['orders'])==1
     assert len(calls)==1

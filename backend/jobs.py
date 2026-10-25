@@ -24,6 +24,12 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
 
     def queue_auto(s,cid,mid):
         c=s.get(Conversation,cid);live=s.get(Record,'agent:live')
+        attachments=list(s.scalars(select(Record).where(Record.kind=='attachments',Record.data['message_id'].as_integer()==mid)))
+        if attachments:
+            if c and c.mode=='ai' and live and live.data.get('auto_media_analysis'):
+                for item in attachments:
+                    if item.data['status']=='ready':enqueue(s,'media_analyze',{'conversation_id':cid,'attachment_id':item.id,'automatic':True},key='media-auto-'+item.id)
+            return None
         if c and c.mode=='ai' and live and (live.data.get('auto_draft',False) or live.data.get('auto_reply',False)):
             return enqueue(s,'sales_agent' if live.data.get('auto_reply') else 'ai_draft',{'conversation_id':cid,'message_id':mid,'automatic':True},key='message-'+str(mid))
 
@@ -86,7 +92,9 @@ def install_jobs(app,engine,Record,Conversation,Message,authorize,session,put,no
                 try:
                     payload=data['payload'];c=s.get(Conversation,payload['conversation_id'])
                     if not c:raise ValueError('Conversation no longer exists')
-                    if data['kind']=='outreach':
+                    if data['kind']=='media_analyze':
+                        output=await app.state.analyze_attachment(s,c.id,payload['attachment_id'],payload.get('automatic',False))
+                    elif data['kind']=='outreach':
                         output=await app.state.deliver_outreach(s,c.id,payload['text'],rid,payload.get('marketing',False))
                     elif data['kind']=='sales_agent':
                         output=await app.state.sales_respond(c.id,payload['message_id'],s)

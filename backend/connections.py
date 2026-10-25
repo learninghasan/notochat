@@ -61,17 +61,35 @@ def install_connections(app,engine,Record,authorize,session,tenant):
             except HTTPException:raise
             except Exception:raise HTTPException(503,'Stored connection credentials could not be decrypted')
 
+    def resolve(channel,account):
+        d=read()
+        if channel in ('Messenger','Instagram','Facebook comments'):
+            for pid,page in d.get('META_PAGES',{}).items():
+                target=pid if channel!='Instagram' else page.get('instagram_account_id')
+                if account and account==target:
+                    if not page.get('enabled',True):return None
+                    return {**d,'META_PAGE_ID':pid,'META_PAGE_ACCESS_TOKEN':page['access_token'],'INSTAGRAM_ACCOUNT_ID':page.get('instagram_account_id',''),'INSTAGRAM_ACCESS_TOKEN':page['access_token'],'account_name':page.get('name',pid)}
+            # A page list is authoritative; stale singular fields cannot re-enable a page.
+            if d.get('META_PAGES'):return None
+        expected=d.get('WHATSAPP_PHONE_NUMBER_ID') if channel=='WhatsApp' else d.get('INSTAGRAM_ACCOUNT_ID') if channel=='Instagram' else d.get('META_PAGE_ID')
+        return d if account and account==expected else None
+
     def manager(principal):
         if tenant and (not principal or principal.get('role') not in ('owner','admin')):raise HTTPException(403,'Owner or admin permission required')
 
     @app.get('/connections/configuration',dependencies=[Depends(authorize)])
     def status(principal=Depends(authorize)):
         manager(principal);d=read()
-        return {**{key:bool(d.get(env)) for key,env in MAPPING.items()},'graph_version_value':d.get('META_GRAPH_VERSION',''),'page_id_value':d.get('META_PAGE_ID',''),'instagram_account_id_value':d.get('INSTAGRAM_ACCOUNT_ID',''),'whatsapp_phone_id_value':d.get('WHATSAPP_PHONE_NUMBER_ID',''),'courier_live':d.get('COURIER_LIVE_ENABLED')=='1','pathao_sandbox':d.get('PATHAO_SANDBOX')!='0','live_send':d.get('ENABLE_LIVE_SEND')=='1','widget_enabled':d.get('WIDGET_ENABLED')=='1','widget_origins':d.get('WIDGET_ORIGINS',[]),'encrypted_at_rest':bool(d) if tenant else False,'note':'Blank secret inputs preserve existing values. Secrets are never returned.'}
+        return {**{key:bool(d.get(env)) for key,env in MAPPING.items()},'graph_version_value':d.get('META_GRAPH_VERSION',''),'page_id_value':d.get('META_PAGE_ID',''),'instagram_account_id_value':d.get('INSTAGRAM_ACCOUNT_ID',''),'whatsapp_phone_id_value':d.get('WHATSAPP_PHONE_NUMBER_ID',''),'courier_live':d.get('COURIER_LIVE_ENABLED')=='1','pathao_sandbox':d.get('PATHAO_SANDBOX')!='0','live_send':d.get('ENABLE_LIVE_SEND')=='1','widget_enabled':d.get('WIDGET_ENABLED')=='1','widget_origins':d.get('WIDGET_ORIGINS',[]),'encrypted_at_rest':bool(d) if tenant else False,'pages':[{'id':pid,'name':p.get('name',pid),'instagram_account_id':p.get('instagram_account_id',''),'enabled':p.get('enabled',True)} for pid,p in d.get('META_PAGES',{}).items()],'note':'Blank secret inputs preserve existing values. Secrets are never returned.'}
 
     @app.put('/connections/configuration',dependencies=[Depends(authorize)])
     def save(body:ChannelConfiguration,principal=Depends(authorize),s:Session=Depends(session)):
-        manager(principal);fernet=cipher();d=read()
+        from sqlalchemy import select
+        manager(principal);fernet=cipher()
+        s.scalar(select(Record).where(Record.id=='agent:live').with_for_update())
+        current=s.get(Record,'connections:private')
+        d=json.loads(fernet.decrypt(current.data['ciphertext'].encode())) if current else read()
+        if d.get('META_PAGES') and any(getattr(body,k) and getattr(body,k)!=d.get(v) for k,v in MAPPING.items() if k in ('app_secret','page_id','page_access_token','instagram_account_id','instagram_access_token')):raise HTTPException(409,'Reconnect pages through Meta OAuth to change their account or token; existing page lists are preserved')
         for key,env in MAPPING.items():
             if getattr(body,key):d[env]=getattr(body,key)
         d['COURIER_LIVE_ENABLED']='1' if body.courier_live else '0'
@@ -85,12 +103,29 @@ def install_connections(app,engine,Record,authorize,session,tenant):
         else:s.add(Record(id='connections:private',kind='private_credentials',data=payload))
         s.commit();return {'saved':True,'secrets_returned':False}
 
+    class PageState(BaseModel):
+        enabled:bool
+
+    @app.patch('/connections/meta/pages/{page_id}',dependencies=[Depends(authorize)])
+    def page_state(page_id:str,body:PageState,principal=Depends(authorize),s:Session=Depends(session)):
+        from sqlalchemy import select
+        manager(principal)
+        s.scalar(select(Record).where(Record.id=='agent:live').with_for_update())
+        r=s.get(Record,'connections:private')
+        d=json.loads(cipher().decrypt(r.data['ciphertext'].encode())) if r else {}
+        pages=d.get('META_PAGES',{})
+        if page_id not in pages:raise HTTPException(404,'Connected page not found')
+        pages[page_id]={**pages[page_id],'enabled':body.enabled};d['META_PAGES']=pages
+        r.data={'ciphertext':cipher().encrypt(json.dumps(d).encode()).decode()};s.commit()
+        return {'page_id':page_id,'enabled':body.enabled}
+
     @app.delete('/connections/configuration',dependencies=[Depends(authorize)])
     def remove(principal=Depends(authorize),s:Session=Depends(session)):
         manager(principal);r=s.get(Record,'connections:private')
         if r:s.delete(r);s.commit()
         return {'removed':True,'note':'Provider tokens are removed locally; revoke access at Meta separately if necessary.'}
 
+    app.state.channel_account=resolve
     app.state.credential_cipher=cipher
     app.state.channel_configuration=read
     return read

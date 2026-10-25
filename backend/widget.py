@@ -83,6 +83,7 @@ def install_widget(app,engine,Record,Conversation,Message,session,configuration=
         if r.data.get('last_sent') and (now-datetime.fromisoformat(r.data['last_sent'])).total_seconds()<2:raise HTTPException(429,'Please wait a moment before sending again')
         cid=r.data['conversation_id']
         message=Message(conversation_id=cid,role='customer',text=body.text.strip());s.add(message);s.flush()
+        s.add(Record(id=f'verified_message:{message.id}',kind='verified_message',data={'conversation_id':cid,'message_id':message.id,'source':'website-widget'}))
         app.state.queue_auto_draft(s,cid,message.id)
         r.data={**r.data,'count':r.data['count']+1,'last_sent':now.isoformat()}
         meta=s.get(Record,f'conversation:{cid}');meta.data={**meta.data,'last_inbound':now.isoformat(),'last_verified_inbound':now.isoformat()}

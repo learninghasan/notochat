@@ -3,7 +3,7 @@ import hashlib,json,os,re,secrets,time
 from urllib.parse import urlencode,urlsplit
 from fastapi import Depends,HTTPException
 from pydantic import BaseModel,Field
-from sqlalchemy import delete,update
+from sqlalchemy import delete,select,update
 
 class Complete(BaseModel):
     state:str=Field(min_length=32,max_length=200)
@@ -71,12 +71,17 @@ def install_meta_oauth(app,Record,authorize,session):
     @app.get('/oauth/meta/pages')
     def pages(p=Depends(authorize),s=Depends(session)):
         owner(p)
-        return [{'id':x['id'],'name':x.get('name','Facebook page'),'instagram_account_id':x.get('instagram_business_account',{}).get('id','')} for x in pending(s,p['user_id'])]
+        candidates=pending(s,p['user_id']);chosen=s.get(Record,'oauth-pages:'+p['user_id']).data.get('selected_ids',[])
+        return [{'id':x['id'],'name':x.get('name','Facebook page'),'instagram_account_id':x.get('instagram_business_account',{}).get('id','')} for x in candidates if x['id'] not in chosen]
 
     @app.post('/oauth/meta/select')
     async def select_page(body:Selection,p=Depends(authorize),s=Depends(session)):
         owner(p);cfg=config();pages=pending(s,p['user_id']);page=next((x for x in pages if x['id']==body.page_id),None)
         if not page:raise HTTPException(404,'Page is not available in this authorization')
+        if body.page_id in s.get(Record,'oauth-pages:'+p['user_id']).data.get('selected_ids',[]):
+            existing=app.state.channel_configuration().get('META_PAGES',{}).get(body.page_id)
+            if not existing:raise HTTPException(409,'Page configuration changed; authorize again')
+            return {'connected':True,'page_id':body.page_id,'instagram_account_id':existing.get('instagram_account_id',''),'note':'This page selection was already saved.'}
         ig=str(page.get('instagram_business_account',{}).get('id',''))
         if ig and not re.fullmatch(r'\d{1,100}',ig):raise HTTPException(502,'Invalid Instagram account from provider')
         if not hasattr(app.state,'bind_meta_accounts'):raise HTTPException(503,'Business gateway is required')
@@ -88,7 +93,18 @@ def install_meta_oauth(app,Record,authorize,session):
                 r=await client.post('https://graph.facebook.com/'+cfg['META_OAUTH_GRAPH_VERSION']+'/'+body.page_id+'/subscribed_apps',headers={'Authorization':'Bearer '+page['access_token']},data={'subscribed_fields':'messages,messaging_postbacks'});r.raise_for_status()
                 if not r.json().get('success'):raise ValueError('Subscription rejected')
         except (httpx.HTTPError,ValueError):raise HTTPException(502,'Meta page subscription failed. Verify approved permissions and reconnect.')
-        d=app.state.channel_configuration();d.update(META_APP_SECRET=cfg['META_OAUTH_APP_SECRET'],META_GRAPH_VERSION=cfg['META_OAUTH_GRAPH_VERSION'],META_PAGE_ID=body.page_id,META_PAGE_ACCESS_TOKEN=page['access_token'],INSTAGRAM_ACCOUNT_ID=ig,INSTAGRAM_ACCESS_TOKEN=page['access_token'] if ig else '',ENABLE_LIVE_SEND='0')
+        # Serialize encrypted read/modify/write across page selections and settings saves.
+        s.scalar(select(Record).where(Record.id=='agent:live').with_for_update())
+        current=s.get(Record,'connections:private')
+        d=json.loads(cipher().decrypt(current.data['ciphertext'].encode())) if current else {}
+        if d.get('META_PAGE_ID') and d.get('META_APP_SECRET') not in ('',None,cfg['META_OAUTH_APP_SECRET']):raise HTTPException(409,'Existing page uses a different Meta app; migrate that connection before adding pages')
+        connected=d.get('META_PAGES',{})
+        if not connected and d.get('META_PAGE_ID') and d.get('META_PAGE_ACCESS_TOKEN'):
+            connected[d['META_PAGE_ID']]={'name':d['META_PAGE_ID'],'access_token':d['META_PAGE_ACCESS_TOKEN'],'instagram_account_id':d.get('INSTAGRAM_ACCOUNT_ID',''),'enabled':True}
+        if any(pid!=body.page_id and ig and item.get('instagram_account_id')==ig for pid,item in connected.items()):raise HTTPException(409,'Instagram account is already linked to another page in this business')
+        connected[body.page_id]={'name':str(page.get('name','Facebook page'))[:200],'access_token':page['access_token'],'instagram_account_id':ig,'enabled':True}
+        d.update(META_PAGES=connected,META_APP_SECRET=cfg['META_OAUTH_APP_SECRET'],META_VERIFY_TOKEN=cfg['META_OAUTH_VERIFY_TOKEN'],META_GRAPH_VERSION=cfg['META_OAUTH_GRAPH_VERSION'],META_PAGE_ID=body.page_id,META_PAGE_ACCESS_TOKEN=page['access_token'],INSTAGRAM_ACCOUNT_ID=ig,INSTAGRAM_ACCESS_TOKEN=page['access_token'] if ig else '',ENABLE_LIVE_SEND='0')
         save(s,'connections:private','private_credentials',{'ciphertext':cipher().encrypt(json.dumps(d).encode()).decode()})
-        s.delete(s.get(Record,'oauth-pages:'+p['user_id']));s.commit()
+        candidate=s.get(Record,'oauth-pages:'+p['user_id']);s.refresh(candidate)
+        candidate.data={**candidate.data,'selected_ids':list(set(candidate.data.get('selected_ids',[])+[body.page_id]))};s.commit()
         return {'connected':True,'page_id':body.page_id,'instagram_account_id':ig,'live_send':False,'note':'Verify inbound webhooks before explicitly enabling live sending in connection settings.'}

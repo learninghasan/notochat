@@ -41,7 +41,7 @@ def test_oauth_states_are_account_bound_single_use_and_tokens_encrypted(configur
         stored=json.dumps([r.data for r in s.scalars(select(Base.WorkspaceRecord))]);assert 'private-page-token' not in stored and 'private-user-token' not in stored
     selected=call(c,'org_A','POST','/oauth/meta/select',{'page_id':'12345'});assert selected.status_code==200,selected.text
     assert selected.json()['live_send'] is False and 'token' not in selected.text
-    assert call(c,'org_A','GET','/oauth/meta/pages').status_code==409
+    assert call(c,'org_A','GET','/oauth/meta/pages').json()==[]
     assert call(c,'org_A','GET','/connections/configuration').json()['page_access_token'] is True
 
 def test_meta_account_cannot_be_stolen_by_another_business(configured):
@@ -89,3 +89,45 @@ def test_start_purges_expired_secrets_only_in_current_business(configured):
         assert s.get(Base.WorkspaceRecord,'unrelated-record') is not None
         assert s.get(Base.WorkspaceRecord,'oauth-state:'+hashlib.sha256(fresh.encode()).hexdigest()) is not None
     assert call(c,'org_B','GET','/oauth/meta/pages').status_code==200
+
+def test_multiple_pages_preserve_tokens_route_by_recipient_and_pause_independently(configured,monkeypatch):
+    c,g,calls=configured
+    connect(c);assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'12345'}).status_code==200
+    def get(url,args):
+        if url.endswith('/oauth/access_token'):return {'access_token':'private-user-2'}
+        return {'data':[{'id':'22222','name':'Second shop','access_token':'private-page-2','instagram_business_account':{'id':'33333'}}]}
+    calls=mock_client(monkeypatch,get_result=get,post_result={'success':True})
+    connect(c);r=call(c,'org_A','POST','/oauth/meta/select',{'page_id':'22222'});assert r.status_code==200,r.text
+    count=len(calls);assert call(c,'org_A','POST','/oauth/meta/select',{'page_id':'22222'}).status_code==200;assert len(calls)==count
+    status=call(c,'org_A','GET','/connections/configuration').json()
+    assert {p['id'] for p in status['pages']}=={'12345','22222'}
+    assert 'private-page' not in json.dumps(status)
+    assert g.workspace('org_A').state.channel_account('Messenger','12345')['META_PAGE_ACCESS_TOKEN']=='private-page-token'
+    assert g.workspace('org_A').state.channel_account('Instagram','33333')['INSTAGRAM_ACCESS_TOKEN']=='private-page-2'
+    # Same sender and provider message ID on different pages must remain separate.
+    body=json.dumps({'object':'page','entry':[{'id':pid,'messaging':[{'recipient':{'id':pid},'sender':{'id':'same-sender'},'timestamp':int(time.time()*1000),'message':{'mid':'same-message-id','text':'Question for '+pid}}]} for pid in ['12345','22222']]}).encode()
+    headers={'X-Hub-Signature-256':'sha256='+hmac.new(b'platform-secret',body,hashlib.sha256).hexdigest()}
+    assert c.post('/webhooks/meta',content=body,headers=headers).json()['stored']==2
+    assert c.post('/webhooks/meta',content=body,headers=headers).json()['stored']==0
+    conversations=call(c,'org_A','GET','/conversations').json();assert len(conversations)==2
+    w=call(c,'org_A','GET','/workspace').json();assert {m['account'] for m in w['conversation_meta'].values()}=={'12345','22222'}
+    assert call(c,'org_B','GET','/conversations').json()==[]
+    # Only mocked provider delivery is performed.
+    calls=mock_client(monkeypatch,post_result={'message_id':'accepted'})
+    assert call(c,'org_A','PUT','/connections/configuration',{'live_send':True}).status_code==200
+    for chat in conversations:
+        call(c,'org_A','PATCH',f"/conversations/{chat['id']}/mode",{'mode':'human'})
+        call(c,'org_A','POST',f"/conversations/{chat['id']}/messages",{'text':'Team reply'})
+        mid=call(c,'org_A','GET',f"/conversations/{chat['id']}/messages").json()[-1]['id']
+        assert call(c,'org_A','POST',f"/conversations/{chat['id']}/deliver",{'message_id':mid}).status_code==200
+    assert {args['headers']['Authorization'] for _,url,args in calls}=={'Bearer private-page-token','Bearer private-page-2'}
+    assert call(c,'org_A','PATCH','/connections/meta/pages/12345',{'enabled':False},role='member').status_code==403
+    assert call(c,'org_A','PATCH','/connections/meta/pages/12345',{'enabled':False}).status_code==200
+    assert g.workspace('org_A').state.channel_account('Messenger','12345') is None
+    assert g.workspace('org_A').state.channel_account('Instagram','67890') is None
+    assert g.workspace('org_A').state.channel_account('Messenger','22222') is not None
+    assert call(c,'org_B','PATCH','/connections/meta/pages/22222',{'enabled':False}).status_code==404
+    assert call(c,'org_A','PUT','/connections/configuration',{'page_id':'99999'}).status_code==409
+    # Paused page cannot receive new messages, while the other still can.
+    newer=body.replace(b'same-message-id',b'new-message-id');headers['X-Hub-Signature-256']='sha256='+hmac.new(b'platform-secret',newer,hashlib.sha256).hexdigest()
+    assert c.post('/webhooks/meta',content=newer,headers=headers).json()['stored']==1

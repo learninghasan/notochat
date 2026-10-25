@@ -48,6 +48,7 @@ class ProductInput(BaseModel):
 class OrderItem(BaseModel):
     product_id: int
     quantity: int = Field(ge=1, le=1000)
+    expected_unit_price: int | None = Field(default=None, ge=0)
 
 
 class OrderInput(BaseModel):
@@ -112,6 +113,7 @@ class KnowledgeInput(BaseModel):
 class AgentInput(BaseModel):
     auto_draft: bool = False
     auto_reply: bool = False
+    auto_media_analysis: bool = False
     language: Literal["Bangla", "English", "Auto"] = "Auto"
     tone: Literal["Friendly", "Professional", "Concise"] = "Friendly"
     instructions: str = Field(default="", max_length=10000)
@@ -163,7 +165,7 @@ class TeamInput(BaseModel):
 
 class MediaInput(BaseModel):
     kind: Literal["image", "audio"]
-    mime_type: Literal["image/jpeg", "image/png", "image/webp", "audio/webm", "audio/mpeg", "audio/wav", "audio/mp4"]
+    mime_type: Literal["image/jpeg", "image/png", "image/webp", "audio/webm", "audio/mpeg", "audio/wav", "audio/mp4", "audio/ogg"]
     content_base64: str = Field(min_length=4, max_length=12000000)
 
 
@@ -273,7 +275,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     @app.get("/workspace", dependencies=protected)
     def workspace(s: Session = Depends(session)):
         expire(s)
-        return {"leads": records(s,"leads"), "orders": records(s,"orders"), "bookings": records(s,"bookings"), "knowledge": records(s,"knowledge"), "notifications": records(s,"notifications"), "automations": records(s,"automations"), "team": records(s,"team"), "broadcasts": records(s,"broadcasts"), "agent": get(s,"agent:live").data, "agent_versions": records(s,"agent_versions"), "deliveries":records(s,"delivery"), "outreach":records(s,"outreach"), "assistant_drafts":records(s,"assistant_drafts"), "jobs":records(s,"jobs"), "shipments":records(s,"shipments"), "conversation_meta": {str(c.id):meta(s,c.id) for c in s.scalars(select(Conversation))}}
+        return {"leads": records(s,"leads"), "orders": records(s,"orders"), "bookings": records(s,"bookings"), "knowledge": records(s,"knowledge"), "notifications": records(s,"notifications"), "automations": records(s,"automations"), "team": records(s,"team"), "broadcasts": records(s,"broadcasts"), "agent": get(s,"agent:live").data, "agent_versions": records(s,"agent_versions"), "deliveries":records(s,"delivery"), "outreach":records(s,"outreach"), "attachments":records(s,"attachments"), "assistant_drafts":records(s,"assistant_drafts"), "jobs":records(s,"jobs"), "shipments":records(s,"shipments"), "conversation_meta": {str(c.id):meta(s,c.id) for c in s.scalars(select(Conversation))}}
 
     @app.post("/products", dependencies=protected)
     def create_product(body: ProductInput, s: Session = Depends(session)):
@@ -310,17 +312,27 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         # A locked request record serializes retries on PostgreSQL. A unique key handles races.
         rid="orders:"+body.request_id
         import hashlib
-        fingerprint=hashlib.sha256(json.dumps(body.model_dump(exclude={"request_id"}),sort_keys=True).encode()).hexdigest()
+        fingerprint=hashlib.sha256(json.dumps(body.model_dump(exclude={"request_id"},exclude_none=True),sort_keys=True).encode()).hexdigest()
         existing=s.get(Record,rid)
         if existing:
             if existing.data.get("request_fingerprint")!=fingerprint:raise HTTPException(409,"Request ID was already used for different order details")
             return existing.data
-        quantities={}
-        for i in body.items: quantities[i.product_id]=quantities.get(i.product_id,0)+i.quantity
+        quantities={};expected_prices={}
+        for i in body.items:
+            quantities[i.product_id]=quantities.get(i.product_id,0)+i.quantity
+            if i.expected_unit_price is not None:
+                if i.product_id in expected_prices and expected_prices[i.product_id]!=i.expected_unit_price:raise HTTPException(422,"Conflicting quoted prices for the same product")
+                expected_prices[i.product_id]=i.expected_unit_price
         items=[]
         for pid,qty in sorted(quantities.items()):
             p=s.scalar(select(Product).where(Product.id==pid).with_for_update())
+            # A concurrent identical request may have committed while this product lock waited.
+            existing=s.get(Record,rid)
+            if existing:
+                if existing.data.get("request_fingerprint")!=fingerprint:raise HTTPException(409,"Request ID was already used for different order details")
+                return existing.data
             if not p: raise HTTPException(404,"Product not found")
+            if pid in expected_prices and p.price!=expected_prices[pid]:raise HTTPException(409,"Price changed; request a new checkout summary")
             if p.stock < qty: raise HTTPException(409,f"Insufficient stock: {p.name}")
             items.append({"product_id":pid,"name":p.name,"quantity":qty,"unit_price":p.price})
         try:
@@ -511,7 +523,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         async with httpx.AsyncClient(timeout=60) as client:
             try:
                 if body.kind=="audio":
-                    ext={"audio/webm":"webm","audio/mpeg":"mp3","audio/wav":"wav","audio/mp4":"mp4"}[body.mime_type]
+                    ext={"audio/webm":"webm","audio/mpeg":"mp3","audio/wav":"wav","audio/mp4":"mp4","audio/ogg":"ogg"}[body.mime_type]
                     r=await client.post("https://api.openai.com/v1/audio/transcriptions",headers={"Authorization":f"Bearer {key}"},data={"model":model},files={"file":("voice."+ext,raw,body.mime_type)})
                     r.raise_for_status();result=r.json();text=result.get("text","")
                 else:
@@ -535,7 +547,7 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
         ai=bool(os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_MODEL"))
         meta_base=all(settings.get(k) for k in ["META_APP_SECRET","META_VERIFY_TOKEN","META_GRAPH_VERSION"])
         configured={"Messenger":bool(meta_base and settings.get("META_PAGE_ID") and settings.get("META_PAGE_ACCESS_TOKEN")),"Instagram":bool(meta_base and settings.get("INSTAGRAM_ACCOUNT_ID") and (settings.get("INSTAGRAM_ACCESS_TOKEN") or settings.get("META_PAGE_ACCESS_TOKEN"))),"WhatsApp":bool(meta_base and settings.get("WHATSAPP_PHONE_NUMBER_ID") and settings.get("WHATSAPP_ACCESS_TOKEN"))}
-        received={d.get("channel") for d in records(s,"channel")}
+        received={d.get("channel") for d in records(s,"channel") if app.state.channel_account(d.get("channel"),d.get("account"))}
         result=[{"name":"Website widget","configured":settings.get("WIDGET_ENABLED")=="1","ready":settings.get("WIDGET_ENABLED")=="1","detail":"Session-authenticated iframe chat at /widget; set WIDGET_ENABLED=1 and WIDGET_FRAME_ANCESTORS to your allowed site origins"},{"name":"OpenAI","configured":ai,"ready":ai,"detail":"Provider credentials present; an actual request verifies access" if ai else "Set OPENAI_API_KEY and OPENAI_MODEL on the backend"}]
         for channel in ("Messenger","Instagram","WhatsApp"):
             ready=bool(configured[channel] and channel in received and settings.get("ENABLE_LIVE_SEND")=="1")
@@ -590,6 +602,8 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
     from outreach import install_outreach
     install_outreach(app,Record,Conversation,Message,authorize,session,put,notify)
 
+    from attachments import install_attachments
+    install_attachments(app,Record,Conversation,Message,authorize,session,put,notify,media,MediaInput)
     from sales import install_sales
     install_sales(app,Record,Conversation,Message,Product,put,notify,catalog,create_order,OrderInput)
 

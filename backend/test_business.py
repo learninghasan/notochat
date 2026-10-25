@@ -146,3 +146,24 @@ def test_export_excludes_secrets_and_audit_is_business_scoped(gateway,monkeypatc
     audit=call(c,'export_A','GET','/audit').json()
     assert any(e['path']=='/conversations' for e in audit)
     assert call(c,'export_B','GET','/audit').json()==[]
+
+def test_page_scopes_hide_other_pages_messages_attachments_and_mutations(gateway):
+    from main import Base
+    from sqlalchemy.orm import Session
+    c,g=gateway;org='page_scope'
+    chats=[call(c,org,'POST','/conversations',{'customer':name,'channel':channel}).json() for name,channel in [('A','Messenger'),('B','Messenger'),('Web','Website')]]
+    with Session(g.workspace(org).state.engine) as s:
+        for chat,account in zip(chats,['page_A','page_B','']):
+            s.add(Base.WorkspaceRecord(id=f"conversation:{chat['id']}",kind='conversation',data={'account':account}))
+            s.add(Base.WorkspaceRecord(id=f"attachment:{chat['id']}:0",kind='attachments',data={'conversation_id':chat['id'],'message_id':chat['id'],'status':'ready'}))
+        s.commit()
+    assert call(c,org,'PUT','/access/policies/user_test',{'channels':['Messenger','Website'],'accounts':['page_A']}).status_code==200
+    assert {x['customer'] for x in call(c,org,'GET','/conversations',role='member').json()}=={'A','Web'}
+    w=call(c,org,'GET','/workspace',role='member').json();assert {x['conversation_id'] for x in w['attachments']}=={chats[0]['id'],chats[2]['id']}
+    assert call(c,org,'GET',f"/conversations/{chats[1]['id']}/messages",role='member').status_code==404
+    assert call(c,org,'POST',f"/conversations/{chats[1]['id']}/messages",{'text':'Forbidden'},role='member').status_code==404
+    assert call(c,org,'POST',f"/conversations/{chats[1]['id']}/attachments/attachment:{chats[1]['id']}:0/analyze",{},role='member').status_code==404
+    call(c,org,'PUT','/access/policies/user_test',{'channels':['Messenger','Website'],'accounts':[]})
+    assert [x['customer'] for x in call(c,org,'GET','/conversations',role='member').json()]==['Web']
+    call(c,org,'PUT','/access/policies/user_test',{'channels':['Messenger'],'accounts':None})
+    assert len(call(c,org,'GET','/conversations',role='member').json())==2

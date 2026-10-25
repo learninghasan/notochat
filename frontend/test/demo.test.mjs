@@ -70,3 +70,10 @@ test('invoice output escapes customer HTML and marks unverified payments',async(
  const html=invoiceHtml({id:'order:test',items:[{name:'<script>alert(1)</script>',quantity:1,unit_price:100}],customer:'<img src=x onerror=alert(1)>',phone:'12345',address:'Address',total:170,delivery_charge:70,payment_method:'COD',status:'confirmed'});
  assert.ok(!html.includes('<script>'));assert.ok(!html.includes('<img src=x'));assert.ok(html.includes('&lt;script&gt;'));assert.ok(html.includes('unverified'));
 });
+
+test('stale multi-product quotes fail without partial stock reservation in demo',async()=>{
+ const body=order();body.items=[{product_id:1,quantity:1,expected_unit_price:2450},{product_id:2,quantity:1,expected_unit_price:1}];
+ await assert.rejects(()=>post('/orders',body),/Price changed/);
+ assert.equal((await api('/catalog'))[0].stock,12);
+ assert.equal((await api('/workspace')).orders.length,0);
+});
