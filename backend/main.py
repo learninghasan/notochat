@@ -29,7 +29,7 @@ class Product(Base):
 engine = create_engine(os.getenv("DATABASE_URL", "sqlite:///./inbox.db"))
 Base.metadata.create_all(engine)
 with Session(engine) as s:
-    if not s.scalar(select(Conversation.id).limit(1)):
+    if os.getenv("SEED_SAMPLE_DATA", "1" if str(engine.url).startswith("sqlite") else "0") == "1" and not s.scalar(select(Conversation.id).limit(1)):
         s.add_all([Conversation(id=1, customer="রাফি আহমেদ", channel="Messenger"), Conversation(id=2, customer="নুসরাত জাহান", channel="Website"), Conversation(id=3, customer="সাদিয়া রহমান", channel="Instagram", mode="human")])
         s.add_all([Message(conversation_id=1, role="customer", text="পাঞ্জাবিটার দাম কত? ৪২ সাইজ আছে?"), Message(conversation_id=2, role="customer", text="ঢাকায় ডেলিভারি কত দিনে হবে?"), Message(conversation_id=3, role="customer", text="আমার অর্ডারটা এক্সচেঞ্জ করতে চাই।")])
         s.add_all([Product(name="Ivory Panjabi · 42",price=2450,stock=12),Product(name="Navy Linen Shirt · L",price=1390,stock=8)])
@@ -55,6 +55,7 @@ def conversation(s, cid):
 def health(): return {"status":"ok", "scope":"single-workspace development MVP"}
 @app.get("/conversations", dependencies=[Depends(authorize)])
 def conversations(s:Session=Depends(session)):
+    app.state.expire_handovers(s)
     return [{"id":c.id,"customer":c.customer,"channel":c.channel,"mode":c.mode} for c in s.scalars(select(Conversation).order_by(Conversation.id))]
 @app.get("/conversations/{cid}/messages", dependencies=[Depends(authorize)])
 def messages(cid:int,s:Session=Depends(session)):
@@ -69,7 +70,9 @@ def reply(cid:int,body:Reply,s:Session=Depends(session)):
     return {"saved":True,"delivery":"local-only; channel not connected"}
 @app.patch("/conversations/{cid}/mode", dependencies=[Depends(authorize)])
 def mode(cid:int,body:Mode,s:Session=Depends(session)):
-    c=conversation(s,cid); c.mode=body.mode; s.commit(); return {"mode":c.mode}
+    c=conversation(s,cid); c.mode=body.mode
+    if body.mode=="ai": app.state.clear_handover(s,cid)
+    s.commit(); return {"mode":c.mode}
 @app.get("/products", dependencies=[Depends(authorize)])
 def products(s:Session=Depends(session)):
     return [{"id":p.id,"name":p.name,"price":p.price,"stock":p.stock} for p in s.scalars(select(Product))]
@@ -91,3 +94,6 @@ async def draft(cid:int,s:Session=Depends(session)):
     text="".join(c.get("text","") for item in r.json().get("output",[]) for c in item.get("content",[]) if c.get("type")=="output_text")
     if not text: raise HTTPException(502,"AI returned an empty draft")
     return {"text":text,"requires_review":True}
+
+from workspace import install
+install(app, engine, Base, Conversation, Message, Product, authorize, session)

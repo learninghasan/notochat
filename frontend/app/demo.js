@@ -1,27 +1,75 @@
-const KEY='commerce-inbox-demo-v1';
-const seed=()=>({conversations:[{id:1,customer:'রাফি আহমেদ',channel:'Messenger',mode:'ai'},{id:2,customer:'নুসরাত জাহান',channel:'Website',mode:'ai'},{id:3,customer:'সাদিয়া রহমান',channel:'Instagram',mode:'human'}],messages:{1:[{id:1,role:'customer',text:'পাঞ্জাবিটার দাম কত? ৪২ সাইজ আছে?'}],2:[{id:2,role:'customer',text:'ঢাকায় ডেলিভারি কত দিনে হবে?'}],3:[{id:3,role:'customer',text:'আমার অর্ডারটা এক্সচেঞ্জ করতে চাই।'}]},products:[{id:1,name:'Ivory Panjabi · 42',price:2450,stock:12},{id:2,name:'Navy Linen Shirt · L',price:1390,stock:8}]});
-function read(){try{const raw=localStorage.getItem(KEY);if(raw){const s=JSON.parse(raw);if(Array.isArray(s.conversations)&&s.messages&&Array.isArray(s.products))return s;}}catch{}return seed();}
-function save(state){try{localStorage.setItem(KEY,JSON.stringify(state));}catch{throw Error('Browser storage is unavailable or full. Allow local storage to save demo replies.');}}
+const KEY = 'notochat-workspace-v2';
+const iso = () => new Date().toISOString();
+const uid = kind => `${kind}:${crypto.randomUUID()}`;
+export const stages = ['New', 'Contacted', 'Qualified', 'Proposal', 'Won', 'Lost'];
+const defaultAgent = {language:'Auto',tone:'Friendly',instructions:'Help customers using the saved catalog. Ask the team when unsure.',delivery_inside:70,delivery_outside:130,delivery_policy:'',return_policy:'',review_url:'',version:1};
+const seed = () => ({
+ conversations:[{id:1,customer:'রাফি আহমেদ',channel:'Messenger',mode:'ai'},{id:2,customer:'নুসরাত জাহান',channel:'Website',mode:'ai'},{id:3,customer:'সাদিয়া রহমান',channel:'Instagram',mode:'human'},{id:4,customer:'তানভীর ইসলাম',channel:'WhatsApp',mode:'ai'},{id:5,customer:'মেহেদী হাসান',channel:'Facebook comments',mode:'ai'}],
+ messages:{1:[{id:1,role:'customer',text:'পাঞ্জাবিটার দাম কত? ৪২ সাইজ আছে?'}],2:[{id:2,role:'customer',text:'ঢাকায় ডেলিভারি কত দিনে হবে?'}],3:[{id:3,role:'customer',text:'আমার অর্ডারটা এক্সচেঞ্জ করতে চাই।'}],4:[{id:4,role:'customer',text:'শার্টটা নিতে চাই। অর্ডার কীভাবে করব?'}],5:[{id:5,role:'customer',text:'Price please?'}]},
+ products:[{id:1,name:'Ivory Panjabi',price:2450,stock:12,sku:'PNJ-042',category:'Panjabi',size:'42',description:'Ivory embroidered cotton panjabi',image:''},{id:2,name:'Navy Linen Shirt',price:1390,stock:8,sku:'SHR-L',category:'Shirt',size:'L',description:'Navy linen shirt',image:''}],
+ leads:[],orders:[],bookings:[],knowledge:[],notifications:[{id:'notifications:welcome',title:'Welcome to NotoChat',detail:'This is sample data. Take over a conversation to try a reply.',done:false,created_at:iso()}],automations:[],broadcasts:[],team:[{id:'team:owner',name:'Workspace owner',email:'owner@example.com',role:'Owner',channels:[],access:'Profile only; per-user authentication is not configured'}],agent:{...defaultAgent,id:'agent:live'},agent_versions:[],conversation_meta:{},usage:[]
+});
+function read(){try{const raw=localStorage.getItem(KEY);if(raw){const s=JSON.parse(raw);if(Array.isArray(s.conversations)&&s.messages&&Array.isArray(s.products)){const base=seed();return {...base,...s};}}}catch{}return seed();}
+function save(state){try{localStorage.setItem(KEY,JSON.stringify(state));}catch{throw Error('Browser storage is unavailable or full. Allow local storage to save changes.');}}
+function check(ok,message){if(!ok)throw Error(message);}
+function notify(s,title,detail,cid){s.notifications.push({id:uid('notifications'),title,detail,conversation_id:cid,created_at:iso(),done:false});}
+function eligible(s,cid){const date=new Date(s.conversation_meta[cid]?.last_inbound||'');const age=Date.now()-date.getTime();return Number.isFinite(age)&&age>=0&&age<23*3600000;}
+function summary(s){const orders=s.orders.filter(o=>o.status!=='cancelled');return {conversations:s.conversations.length,ai_mode:s.conversations.filter(c=>c.mode==='ai').length,human_mode:s.conversations.filter(c=>c.mode==='human').length,orders:s.orders.length,confirmed_value:orders.reduce((v,o)=>v+o.total,0),delivered_value:orders.filter(o=>o.status==='delivered').reduce((v,o)=>v+o.total,0),leads:s.leads.length,bookings:s.bookings.length,open_notifications:s.notifications.filter(n=>!n.done).length,ai_replies:0,note:'Sample records only. Order value is not verified payment.'};}
+function product(body){check(typeof body.name==='string'&&body.name.trim(),'Product name is required');check(Number.isInteger(body.price)&&body.price>=0&&Number.isInteger(body.stock)&&body.stock>=0,'Price and stock must be non-negative whole numbers');check(!body.image||body.image.startsWith('https://'),'Use an HTTPS image URL');return {...body,name:body.name.trim()};}
+function expire(s){let changed=false;for(const c of s.conversations){const m=s.conversation_meta[c.id];if(m?.handover_until&&new Date(m.handover_until)<=new Date()){c.mode='ai';m.handover_until='';m.assignee='';notify(s,'Returned to AI mode',c.customer,c.id);changed=true;}}if(changed)save(s);}
 export async function demoApi(path,options={}){
- const state=read();const method=options.method||'GET';
- if(path==='/conversations'&&method==='GET')return state.conversations;
- if(path==='/products'&&method==='GET')return state.products;
- const match=path.match(/^\/conversations\/(\d+)\/(messages|mode|draft)$/);
- if(!match)throw Error('Unknown demo action');
- const id=Number(match[1]),kind=match[2],c=state.conversations.find(c=>c.id===id);
- if(!c)throw Error('Conversation not found');
- if(kind==='messages'&&method==='GET')return state.messages[id]||[];
- const body=options.body?JSON.parse(options.body):{};
- if(kind==='mode'&&method==='PATCH'){
-  if(!['ai','human'].includes(body.mode))throw Error('Invalid conversation mode');
-  c.mode=body.mode;save(state);return {mode:c.mode};
+ const s=read();expire(s);const method=options.method||'GET';const body=options.body?JSON.parse(options.body):{};const url=new URL(path,'https://notochat.local');path=url.pathname;
+ if(path==='/conversations'&&method==='GET')return s.conversations;
+ if(path==='/workspace'&&method==='GET')return s;
+ if((path==='/catalog'||path==='/products')&&method==='GET'){const q=(url.searchParams.get('q')||'').toLowerCase();return s.products.filter(p=>!q||JSON.stringify(p).toLowerCase().includes(q));}
+ if(path==='/analytics')return summary(s);
+ if(path==='/integrations')return ['OpenAI','Messenger','Instagram','WhatsApp','Facebook comments','Steadfast','Pathao','bKash / Nagad'].map(name=>({name,ready:false,configured:false,detail:'Not connected in browser demo. Configure the backend and official service credentials.'}));
+ if(path==='/billing')return {currency:'BDT',balance:null,payments_connected:false,usage:[],note:'No live AI usage or payments in demo. No credits are charged.'};
+ if(path==='/products'&&method==='POST'){const d=product(body);check(!d.sku||!s.products.some(p=>p.sku===d.sku),'SKU is already in use');const p={...d,id:Math.max(0,...s.products.map(p=>p.id))+1};s.products.push(p);save(s);return p;}
+ let m=path.match(/^\/products\/(\d+)$/);
+ if(m&&method==='PUT'){const p=s.products.find(p=>p.id===+m[1]);check(p,'Product not found');const d=product(body);check(!d.sku||!s.products.some(x=>x.sku===d.sku&&x.id!==p.id),'SKU is already in use');Object.assign(p,d);save(s);return p;}
+ m=path.match(/^\/conversations\/(\d+)\/(messages|mode|handover|assistant|draft|incoming|media)$/);
+ if(m){const id=+m[1],kind=m[2],c=s.conversations.find(c=>c.id===id);check(c,'Conversation not found');
+  if(kind==='messages'&&method==='GET')return s.messages[id]||[];
+  if(kind==='mode'&&method==='PATCH'){check(['ai','human'].includes(body.mode),'Invalid mode');c.mode=body.mode;if(body.mode==='ai'&&s.conversation_meta[id])Object.assign(s.conversation_meta[id],{assignee:'',handover_until:''});save(s);return {mode:c.mode};}
+  if(kind==='handover'&&method==='POST'){check(Number.isInteger(body.duration_minutes)&&body.duration_minutes>=0,'Invalid takeover duration');c.mode='human';s.conversation_meta[id]={...s.conversation_meta[id],...body,handover_until:body.duration_minutes?new Date(Date.now()+body.duration_minutes*60000).toISOString():''};notify(s,'Team attention needed',body.reason,id);save(s);return s.conversation_meta[id];}
+  if((kind==='messages'||kind==='incoming')&&method==='POST'){
+   if(kind==='messages')check(c.mode==='human','Take over before replying');
+   const text=typeof body.text==='string'?body.text.trim():'';check(text&&text.length<=8000,'Reply must contain 1–8,000 characters');
+   (s.messages[id]??=[]).push({id:Date.now(),role:kind==='incoming'?'customer':'team',text,created_at:iso()});
+   if(kind==='incoming')s.conversation_meta[id]={...s.conversation_meta[id],last_inbound:iso()};save(s);return {saved:true,delivery:'browser-only demo'};
+  }
+  if(['draft','assistant','media'].includes(kind))throw Error('AI is not connected in this demo. Connect your backend AI provider to enable this feature.');
  }
- if(kind==='messages'&&method==='POST'){
-  if(c.mode!=='human')throw Error('Take over before replying');
-  const text=typeof body.text==='string'?body.text.trim():'';
-  if(!text||text.length>8000)throw Error('Reply must contain 1–8,000 characters');
-  (state.messages[id]??=[]).push({id:Date.now(),role:'team',text});save(state);return {saved:true,delivery:'browser-only demo'};
+ if(path==='/orders'&&method==='POST'){
+  check(s.conversations.some(c=>c.id===body.conversation_id),'Select a conversation');check(body.request_id&&body.customer?.trim()&&body.phone?.trim().length>=5&&body.address?.trim().length>=5,'Customer, phone and full address are required');
+  const id='orders:'+body.request_id;const fingerprint=JSON.stringify(body);const existing=s.orders.find(o=>o.id===id);if(existing){check(existing.request_fingerprint===fingerprint,'Request ID was already used for different order details');return existing;}
+  check(Number.isInteger(body.delivery_charge)&&body.delivery_charge>=0,'Invalid delivery charge');check(Array.isArray(body.items)&&body.items.length>0,'Select products');
+  const quantities={};for(const i of body.items){check(Number.isInteger(i.quantity)&&i.quantity>0&&i.quantity<=1000,'Invalid quantity');quantities[i.product_id]=(quantities[i.product_id]||0)+i.quantity;}
+  const items=Object.entries(quantities).map(([pid,quantity])=>{const p=s.products.find(p=>p.id===+pid);check(p,'Product not found');check(p.stock>=quantity,'Insufficient stock: '+p.name);return {product_id:p.id,name:p.name,quantity,unit_price:p.price};});
+  const subtotal=items.reduce((a,i)=>a+i.quantity*i.unit_price,0);const d={...body,id,items,subtotal,total:subtotal+body.delivery_charge,status:'confirmed',created_at:iso(),tracking:'',courier_status:'not booked',payment_status:'unverified',request_fingerprint:fingerprint};
+  items.forEach(i=>{s.products.find(p=>p.id===i.product_id).stock-=i.quantity});s.orders.push(d);notify(s,'Order confirmed',d.customer+' · ৳'+d.total,d.conversation_id);save(s);return d;
  }
- if(kind==='draft')throw Error('AI is not connected in this demo. Configure your backend AI provider to enable drafts.');
- throw Error('Unsupported demo action');
+ m=path.match(/^\/orders\/(.+?)(\/receipt)?$/);
+ if(m){const d=s.orders.find(o=>o.id===m[1]);check(d,'Order not found');if(m[2])return {business:'NotoChat workspace',currency:'BDT',receipt:d,payment_verified:false};
+  if(method==='PATCH'){if(d.status===body.status)return d;check(({confirmed:['shipped','cancelled'],shipped:['delivered'],delivered:[],cancelled:[]}[d.status]||[]).includes(body.status),'Invalid order status transition');if(body.status==='shipped')check(body.tracking?.trim(),'Tracking reference is required; courier is not booked automatically');if(body.status==='cancelled')d.items.forEach(i=>s.products.find(p=>p.id===i.product_id).stock+=i.quantity);Object.assign(d,{status:body.status,updated_at:iso()},body.tracking?{tracking:body.tracking}:{});notify(s,'Order '+body.status,d.customer,d.conversation_id);save(s);return d;}}
+ if(path==='/leads'&&method==='POST'){check(body.name?.trim()&&s.conversations.some(c=>c.id===body.conversation_id),'Customer and conversation required');check(stages.includes(body.stage),'Invalid lead stage');const id='leads:'+body.conversation_id;const d={...body,id,created_at:iso()};s.leads=s.leads.filter(l=>l.id!==id);s.leads.push(d);save(s);return d;}
+ m=path.match(/^\/leads\/(.+)$/);
+ if(m&&method==='PUT'){const d=s.leads.find(l=>l.id===m[1]);check(d,'Lead not found');check(stages.includes(body.stage),'Invalid lead stage');Object.assign(d,body);save(s);return d;}
+ if(path==='/bookings'&&method==='POST'){
+  check(body.customer?.trim()&&body.service?.trim()&&body.resource?.trim(),'Customer, service and resource are required');check(s.conversations.some(c=>c.id===body.conversation_id),'Conversation not found');const start=new Date(body.starts_at);check(start>new Date(),'Choose a future time');check(Number.isInteger(body.duration_minutes)&&body.duration_minutes>=15&&body.duration_minutes<=1440,'Duration must be 15–1440 minutes');const end=new Date(+start+body.duration_minutes*60000);check(!s.bookings.some(b=>b.resource===body.resource&&b.status!=='cancelled'&&start<new Date(b.ends_at)&&end>new Date(b.starts_at)),'This resource is already booked at that time');const d={...body,id:uid('bookings'),starts_at:start.toISOString(),ends_at:end.toISOString(),status:'requested',payment_status:'unverified',created_at:iso()};s.bookings.push(d);notify(s,'Booking request',d.customer+' · '+d.service,d.conversation_id);save(s);return d;
+ }
+ m=path.match(/^\/bookings\/(.+)$/);
+ if(m&&method==='PATCH'){const d=s.bookings.find(b=>b.id===m[1]);check(d,'Booking not found');if(body.status===d.status)return d;check(({requested:['confirmed','cancelled'],confirmed:['completed','cancelled'],completed:[],cancelled:[]}[d.status]||[]).includes(body.status),'Invalid booking transition');d.status=body.status;if(d.status==='confirmed')for(const hours of [24,2]){const due=new Date(new Date(d.starts_at)-hours*3600000);if(due>new Date())s.automations.push({id:uid('automations'),conversation_id:d.conversation_id,kind:'booking-reminder',text:`Reminder: ${d.service} at ${d.starts_at}`,due_at:due.toISOString(),status:'draft',delivery:'not sent'});}save(s);return d;}
+ if(path==='/knowledge'&&method==='POST'){check(body.title?.trim()&&body.text?.trim(),'Title and document content are required');const d={...body,id:uid('knowledge'),created_at:iso()};s.knowledge.push(d);save(s);return d;}
+ if(path==='/knowledge/search'){const terms=(url.searchParams.get('q')||'').toLowerCase().split(/\s+/).filter(Boolean);return s.knowledge.map(d=>({...d,score:terms.filter(t=>(d.title+' '+d.text).toLowerCase().includes(t)).length,match_type:'keyword'})).filter(d=>d.score).sort((a,b)=>b.score-a.score);}
+ m=path.match(/^\/knowledge\/(.+)$/);if(m&&method==='DELETE'){check(s.knowledge.some(d=>d.id===m[1]),'Document not found');s.knowledge=s.knowledge.filter(d=>d.id!==m[1]);save(s);return {deleted:true};}
+ if(path==='/agent/versions'&&method==='POST'){const d={...body,id:uid('agent_versions'),created_at:iso(),state:'draft'};s.agent_versions.push(d);save(s);return d;}
+ m=path.match(/^\/agent\/versions\/(.+)\/publish$/);if(m&&method==='POST'){const d=s.agent_versions.find(d=>d.id===m[1]);check(d,'Version not found');s.agent_versions.push({...s.agent,id:uid('agent_versions'),state:'previous',created_at:iso()});s.agent={...d,id:'agent:live',version:s.agent.version+1,published_at:iso()};save(s);return s.agent;}
+ m=path.match(/^\/notifications\/(.+)\/ack$/);if(m&&method==='POST'){const d=s.notifications.find(d=>d.id===m[1]);check(d,'Notification not found');d.done=true;d.acknowledged_at=iso();save(s);return d;}
+ if(path==='/automations'&&method==='POST'){check(s.conversations.some(c=>c.id===body.conversation_id)&&body.text?.trim()&&Number.isFinite(Date.parse(body.due_at)),'Conversation, message and valid schedule are required');const d={...body,id:uid('automations'),status:'draft',delivery:'not sent',created_at:iso()};s.automations.push(d);save(s);return d;}
+ m=path.match(/^\/automations\/(.+)\/preview$/);if(m&&method==='POST'){const d=s.automations.find(d=>d.id===m[1]);check(d,'Automation not found');return {eligible:eligible(s,d.conversation_id),sent:false,reason:eligible(s,d.conversation_id)?'Within the 23-hour sample inbound window. Demo does not send messages.':'No verified recent inbound message. Sending is blocked.'};}
+ if(path==='/broadcasts/preview'&&method==='POST'){check(body.text?.trim(),'Message is required');const ids=s.conversations.filter(c=>(body.channel==='All'||c.channel===body.channel)&&eligible(s,c.id)).map(c=>c.id);const d={...body,id:uid('broadcasts'),eligible_ids:ids,created_at:iso(),status:'preview',sent:0};s.broadcasts.push(d);save(s);return d;}
+ if(path==='/team'&&method==='POST'){check(body.name?.trim()&&body.email?.includes('@'),'Name and valid email are required');check(!s.team.some(t=>t.email.toLowerCase()===body.email.toLowerCase()),'Email already listed');const d={...body,id:uid('team'),access:'Profile only; no invitation sent or access control applied'};s.team.push(d);save(s);return d;}
+ throw Error('This action is not available');
 }
