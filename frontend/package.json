@@ -1,5 +1,5 @@
 {
-  "name": "commerce-inbox",
+  "name": "notochat",
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",

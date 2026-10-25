@@ -34,7 +34,7 @@ with Session(engine) as s:
         s.add_all([Message(conversation_id=1, role="customer", text="পাঞ্জাবিটার দাম কত? ৪২ সাইজ আছে?"), Message(conversation_id=2, role="customer", text="ঢাকায় ডেলিভারি কত দিনে হবে?"), Message(conversation_id=3, role="customer", text="আমার অর্ডারটা এক্সচেঞ্জ করতে চাই।")])
         s.add_all([Product(name="Ivory Panjabi · 42",price=2450,stock=12),Product(name="Navy Linen Shirt · L",price=1390,stock=8)])
         s.commit()
-app = FastAPI(title="Commerce Inbox", version="0.1.0")
+app = FastAPI(title="NotoChat", version="0.1.0")
 security = HTTPBearer(auto_error=False)
 def authorize(auth: HTTPAuthorizationCredentials | None = Depends(security)):
     token = os.getenv("APP_TOKEN")

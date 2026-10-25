@@ -1,4 +1,4 @@
-# Commerce Inbox
+# NotoChat
 
 Development MVP: Next.js (JavaScript), FastAPI (Python), SQLAlchemy and PostgreSQL. SQLite fallback for quick local evaluation. Single workspace with sample data, not a production SaaS.
 
