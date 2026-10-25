@@ -20,13 +20,8 @@ def install_knowledge(app,Record,authorize,session,put):
         try:raw=base64.b64decode(body.content_base64,validate=True)
         except (binascii.Error,ValueError):raise HTTPException(422,'Invalid PDF encoding')
         if len(raw)>5_000_000 or not raw.startswith(b'%PDF-'):raise HTTPException(422,'Use a PDF under 5 MB')
-        from pypdf import PdfReader
-        try:
-            reader=PdfReader(io.BytesIO(raw),strict=True)
-            if reader.is_encrypted or len(reader.pages)>50:raise ValueError()
-            text='\n'.join((page.extract_text() or '')[:10000] for page in reader.pages)[:50000]
-        except Exception:raise HTTPException(422,'Could not extract this PDF. Use an unencrypted document with at most 50 pages.')
-        if not text.strip():raise HTTPException(422,'No selectable text found. Scanned PDF OCR is not implemented.')
+        from media_extract import extract
+        text=extract(raw,'application/pdf','document')['text']
         d=put(s,'knowledge',{'title':body.title,'text':text,'source':'PDF'});s.commit();return d
 
     async def embed(texts,s):

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select,update,delete
 
 LIMIT=8_000_000
-MIMES={'image/jpeg':'image','image/png':'image','image/webp':'image','audio/mpeg':'audio','audio/wav':'audio','audio/webm':'audio','audio/mp4':'audio','audio/ogg':'audio'}
+MIMES={'image/jpeg':'image','image/png':'image','image/webp':'image','audio/mpeg':'audio','audio/wav':'audio','audio/webm':'audio','audio/mp4':'audio','audio/ogg':'audio','application/pdf':'document','text/plain':'document','text/markdown':'document','video/mp4':'video','video/webm':'video'}
 
 def media_url(value,whatsapp=False):
     try:
@@ -20,9 +20,13 @@ def signature_matches(raw,mime):
     if mime=='image/png':return raw.startswith(b'\x89PNG\r\n\x1a\n')
     if mime in ('image/webp','audio/wav'):return raw.startswith(b'RIFF') and raw[8:12]==(b'WEBP' if mime=='image/webp' else b'WAVE')
     if mime=='audio/ogg':return raw.startswith(b'OggS')
-    if mime=='audio/webm':return raw.startswith(b'\x1a\x45\xdf\xa3')
-    if mime=='audio/mp4':return raw[4:8]==b'ftyp'
+    if mime in ('audio/webm','video/webm'):return raw.startswith(b'\x1a\x45\xdf\xa3')
+    if mime in ('audio/mp4','video/mp4'):return raw[4:8]==b'ftyp'
     if mime=='audio/mpeg':return raw.startswith(b'ID3') or len(raw)>1 and raw[0]==255 and raw[1]&224==224
+    if mime=='application/pdf':return raw.startswith(b'%PDF-')
+    if mime in ('text/plain','text/markdown'):
+        try:return b'\x00' not in raw and bool(raw.decode('utf-8-sig').strip())
+        except UnicodeError:return False
     return False
 
 class Analyze(BaseModel):
@@ -34,9 +38,9 @@ def install_attachments(app,Record,Conversation,Message,authorize,session,put,no
         for index,item in enumerate(event.get('attachments',[])[:3]):
             rid=f'attachment:{mid}:{index}'
             if s.get(Record,rid):continue
-            kind=item.get('type','unknown');source={'url':item.get('payload',{}).get('url','')} if event['channel']!='WhatsApp' else item
-            supported=kind in ('image','audio') and (bool(re.fullmatch(r'\d{1,100}',str(source.get('id','')))) if event['channel']=='WhatsApp' else media_url(source['url']))
-            d={'conversation_id':cid,'message_id':mid,'channel':event['channel'],'account':event['account'],'kind':kind if kind in ('image','audio') else 'unsupported','status':'ready' if supported else 'unsupported','received_at':time.time(),'attempts':0}
+            kind=item.get('type','unknown');kind='document' if kind=='file' else kind;source={'url':item.get('payload',{}).get('url','')} if event['channel']!='WhatsApp' else item
+            supported=kind in ('image','audio','document','video') and (bool(re.fullmatch(r'\d{1,100}',str(source.get('id','')))) if event['channel']=='WhatsApp' else media_url(source['url']))
+            d={'conversation_id':cid,'message_id':mid,'channel':event['channel'],'account':event['account'],'kind':kind if kind in ('image','audio','document','video') else 'unsupported','status':'ready' if supported else 'unsupported','received_at':time.time(),'attempts':0}
             if supported:
                 try:encrypted=app.state.credential_cipher().encrypt(json.dumps(source).encode()).decode()
                 except HTTPException:d['status']='unavailable';d['error']='Credential encryption must be configured before receiving media'
@@ -107,9 +111,20 @@ def install_attachments(app,Record,Conversation,Message,authorize,session,put,no
             source=s.get(Record,'source:'+rid)
             if not source:raise HTTPException(409,'Media source is unavailable')
             decoded=json.loads(app.state.credential_cipher().decrypt(source.data['ciphertext'].encode()))
-            app.state.require_credit(s,d['kind'])
+            if d['kind']!='document':app.state.require_credit(s,d['kind'])
             raw,mime=await download(d,decoded)
-            result=await media(cid,MediaInput(kind=d['kind'],mime_type=mime,content_base64=base64.b64encode(raw).decode()),s)
+            if d['kind'] in ('document','video'):
+                import asyncio
+                from media_extract import extract
+                parsed=await asyncio.to_thread(extract,raw,mime,d['kind'])
+                if d['kind']=='document':result={'text':'Extracted document text (untrusted; review before use):\n'+parsed['text']}
+                else:
+                    descriptions=[]
+                    for i,frame in enumerate(parsed['images']):
+                        output=await media(cid,MediaInput(kind='image',mime_type='image/jpeg',content_base64=base64.b64encode(frame).decode()),s)
+                        descriptions.append(f"Frame {i+1}: "+output['text'])
+                    result={'text':f"Video frame review ({parsed['duration']:.1f}s). Three sampled frames; audio is NOT included.\n"+'\n'.join(descriptions)}
+            else:result=await media(cid,MediaInput(kind=d['kind'],mime_type=mime,content_base64=base64.b64encode(raw).decode()),s)
             r=s.get(Record,rid);s.refresh(r)
             if r.data['attempts']!=attempt:return {'sent':False,'skipped':'A newer analysis attempt superseded this result'}
             draft=put(s,'assistant_drafts',{'conversation_id':cid,'text':result['text'][:8000],'status':'review','attachment_id':rid,'message_id':d['message_id']},'assistant_drafts:'+rid)

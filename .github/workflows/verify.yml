@@ -49,6 +49,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r backend/requirements.txt
+      - name: Install bounded video parser dependency
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pytest -q backend
       - name: Verify PostgreSQL isolation and concurrency
         env:

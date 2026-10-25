@@ -4,7 +4,7 @@
 
 NotoChat is the chosen name for an online-business all-in-one messaging and sales app, based on the AIPraktor reference. The user requested Facebook, Instagram, WhatsApp and website conversations in one platform; natural AI customer replies and operator guidance; reference features implemented one by one; source in the existing `learninghasan/notochat` GitHub repository; and a usable Vercel deployment URL. They authorized continuing implementation and deployment, but no real customer outreach is used for tests.
 
-The actual feature-by-feature implementation and outstanding product work are in [FEATURES.md](FEATURES.md). This is not full feature parity or production readiness. Following the next implementation increment, rich product messages, automatic voice/image checkout, OCR, natural-language rule editing/test console, production migrations, retention/deletion and device-membership lifecycle still need work. Multi-page support, bounded image/audio ingestion and multi-item text checkout are now implemented with the limits described below. Shipping the existing draft features does not resolve those gaps.
+The consolidated, original-scope completion inventory is [REFERENCE_COMPLETION_MATRIX.md](REFERENCE_COMPLETION_MATRIX.md). It distinguishes implemented local behavior, remaining recoverable product work, external dependencies and optional enhancements. This is not full feature parity or production readiness.
 
 ## Evidence reconciled
 
@@ -44,3 +44,15 @@ Reading commits, check runs and Actions run lists succeeds. Reading repository A
 - Signed image/audio attachment ingestion is implemented with encrypted source locations, bounded/restricted downloads, explicit/opt-in background analysis and review drafts. Unsupported formats and voice/image-confirmed autonomous checkout remain outside this increment’s completion claim.
 - Aggregate local verification passed 105 Python tests, 18 JavaScript tests and production build. Disposable PostgreSQL checks exercise concurrent identical carts, page/settings mutations and media analysis claims in addition to previous isolation/concurrency coverage. All provider calls in these tests are mocked. Updated HTTP smoke/remote CI outcomes are reported with the pushed commit; no live provider or browser result is implied.
 - No new scope/approval question was necessary for these local extensions. Vercel writes remain unattempted; real provider configuration/sends and supported browser/device verification retain the previously documented boundaries. Remaining product work is implementation work, not falsely attributed to those deployment/browser dependencies.
+
+
+## Documents, media checkout and agent review continuation
+
+Reference evidence: voice/image shopping and natural-language agent changes with old/new review, test and explicit publication are advertised by AIPraktor; the user requested the reference features one by one. Bounded document/video handling was also explicitly requested by the coordinator.
+
+- Signed PDF/text and short-video attachments use resource-limited isolated parsing, fixed formats, restricted downloads and review-only output. Video samples three frames, excludes audio and requires system FFmpeg/FFprobe; PDF extraction rejects encryption and excessive pages. This is resource isolation, not a claim of a full OS container sandbox.
+- Media cart suggestions are strict catalog-ID data. Operator-reviewed customer details and quote lead to a proposal, never an immediate order. Existing verified customer confirmation, expiry, quote/stock and duplicate protections finish the flow. Failed cart suggestions have explicit retry UI; no automatic retries hide additional AI usage.
+- Natural-language agent changes produce a before/after diff without saving, changing automation flags/prices, publishing or sending. The editor and saved-version preview provide separate review steps; preview is simulated model output with no action tools.
+- The consolidated matrix records all remaining original-scope local work at once, including comment reply transport, rich product messages/visual matching, automatic status/lead triggers, booking intake, waiting/response metrics and lifecycle cleanup. They are not external-access blockers.
+
+Verification for this increment: 129 Python tests, 18 JavaScript tests, production Next.js build and disposable PostgreSQL isolation/concurrency checks passed locally. Signed document/video and media-cart provider calls are mocked; parser fixtures are synthetic real PDF/MP4 bytes. Real HTTP-stack checks will run again in remote CI after publication. Browser, live-provider and deployment verification remain unperformed.
