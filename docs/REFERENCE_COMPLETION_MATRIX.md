@@ -64,3 +64,12 @@ All seven groups have a bounded local implementation described above and in FINA
 7. Lifecycle: recoverable controls, gated offline purge, membership cleanup, current schema baseline/drift guard and backup-authentication code complete. Production destructive operations, durable/offsite backup provisioning and a real restore drill require explicit operational authorization/access. Future schema changes need their own migration; no generic rollback guarantee.
 
 User reports Vercel import/deployment is already done. Current connector still finds no NotoChat project in its accessible team and GET /v2/user returns 404. The exact project/live URL or attached browser connection is needed to identify that deployment; no denied write was retried. Browser control tools are absent in this task. Existing-task browser attachment is the smallest browser handoff, not a replacement task.
+
+## Free Render deployment follow-up
+
+User selected free Render testing hosting. `render.yaml` and
+`docs/RENDER_FREE_SETUP.md` define one free Docker API, no worker or database
+provisioning. Deployment remains pending account access and approved durable
+PostgreSQL/secrets; no public Render URL is verified. Existing Vercel browser-local
+demo and a backend-connected demo are distinct. Production/live-provider rows
+above remain unverified; this configuration does not provide continuous jobs.

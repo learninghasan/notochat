@@ -1,0 +1,31 @@
+# Testing only: one free web service, no worker, cron, disk or expiring database.
+services:
+  - type: web
+    name: notochat-api-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./deploy/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SEED_SAMPLE_DATA
+        value: "0"
+      - key: ENABLE_LIVE_SEND
+        value: "0"
+      - key: ENABLE_EMAIL_SEND
+        value: "0"
+      - key: WIDGET_ENABLED
+        value: "0"
+      - key: SSLCOMMERZ_LIVE
+        value: "0"
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_TOKEN
+        sync: false
+      - key: INTERNAL_API_SECRET
+        sync: false
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false
