@@ -626,6 +626,8 @@ def install(app, engine, Base, Conversation, Message, Product, authorize, sessio
 
     from branding import install_branding
     install_branding(app,Record,authorize,session,put)
+    from gemini_pilot import install_gemini_pilot
+    install_gemini_pilot(app,Record,authorize,session,put)
     from website_catalog import install_website_catalog
     install_website_catalog(app,Record,authorize,session,put)
     from commerce_review import install_reviews
