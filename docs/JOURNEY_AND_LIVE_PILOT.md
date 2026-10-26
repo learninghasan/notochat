@@ -57,3 +57,19 @@ Media parsing, provider delivery, push/Chrome device permissions, courier bookin
 verified payments, automatic background jobs and authenticated team membership need
 actual backend/provider/device setup. Journey lab explains these boundaries; it
 must not fabricate successful sends, payments, AI calls, or live verification.
+
+## Interactive five-channel simulator
+
+The Journey lab now contains a working deterministic simulator for WhatsApp,
+Website, Instagram, Messenger and Facebook comments. Start a channel and run eight
+steps. Customer/AI/staff messages appear in its visitor view and Shared inbox;
+fictional products, leads, approvals, confirmed orders, deliveries and follow-up
+drafts persist in the browser demo. Confirmation is required; stale prices/stock
+block checkout and quotes can be refreshed. Repeated steps are idempotent.
+Existing sample/custom records are preserved. Real workspaces offer a switch to
+this isolated demo instead of creating fake provider events in the live database.
+
+AI wording, photo/voice/document interpretation, Facebook private replies,
+shipment and ratings in these scenarios are visibly simulated fixtures, not actual
+model/parser/provider results. Actual workflow controls remain in the 18 guided
+screens. This simulator is not evidence of live Meta connectivity or media quality.

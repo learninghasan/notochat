@@ -1,3 +1,4 @@
+import {scenarioApi} from './demo-scenarios.js';
 import {demoCommerce} from './demo-commerce.js';
 const KEY = 'notochat-peoniara-synthetic-v1'; // Old demo storage remains untouched.
 const iso = () => new Date().toISOString();
@@ -23,6 +24,7 @@ function product(body){check(typeof body.name==='string'&&body.name.trim(),'Prod
 function expire(s){let changed=false;for(const c of s.conversations){const m=s.conversation_meta[c.id];if(m?.handover_until&&new Date(m.handover_until)<=new Date()){c.mode='ai';m.handover_until='';m.assignee='';notify(s,'Returned to AI mode',c.customer,c.id);changed=true;}}if(changed)save(s);}
 export async function demoApi(path,options={}){
  const s=read();expire(s);const method=options.method||'GET';const body=options.body?JSON.parse(options.body):{};const url=new URL(path,'https://notochat.local');path=url.pathname;
+ const scenario=scenarioApi(s,path,method,body,save,check);if(scenario!==undefined)return scenario;
  const reviewed=demoCommerce(s,path,method,body,save,check);if(reviewed!==undefined)return reviewed;
  if(path==='/conversations'&&method==='POST'){check(body.customer?.trim(),'Customer name is required');check(['Messenger','Instagram','WhatsApp','Facebook comments','Website'].includes(body.channel),'Invalid channel');const d={id:Math.max(0,...s.conversations.map(c=>c.id))+1,customer:body.customer.trim(),channel:body.channel,mode:'human'};s.conversations.push(d);s.messages[d.id]=[];save(s);return d;}
  if(path==='/conversations'&&method==='GET')return s.conversations;
