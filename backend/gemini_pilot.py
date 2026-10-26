@@ -33,11 +33,18 @@ def install_gemini_pilot(app,Record,authorize,session,put):
         context={'question':body.question,'catalog_snapshot':products,'last_sync':snapshot.data.get('last_sync') if snapshot else None}
         try:
             async with httpx.AsyncClient(timeout=30,follow_redirects=False) as c:
-                r=await c.post(f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',headers={'x-goog-api-key':key},json={'systemInstruction':{'parts':[{'text':instructions}]},'contents':[{'role':'user','parts':[{'text':json.dumps(context,ensure_ascii=False)}]}],'generationConfig':{'maxOutputTokens':800}})
+                r=await c.post(f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',headers={'x-goog-api-key':key},json={'systemInstruction':{'parts':[{'text':instructions}]},'contents':[{'role':'user','parts':[{'text':json.dumps(context,ensure_ascii=False)}]}],'generationConfig':{'maxOutputTokens':800,**({'thinkingConfig':{'thinkingBudget':0}} if model=='gemini-2.5-flash' else {})}})
                 if r.status_code==429:raise HTTPException(429,'Gemini quota reached. Try later; no paid fallback was used.')
-                r.raise_for_status();data=r.json()
+                if r.status_code in (400,401,403):raise HTTPException(502,'Gemini rejected the request or API key permissions (HTTP '+str(r.status_code)+'). Check the backend key, project restrictions and model configuration.')
+                if r.status_code==404:raise HTTPException(502,'Gemini model was not found or is unavailable to this project (HTTP 404).')
+                if r.status_code>=400:raise HTTPException(502,'Gemini provider returned HTTP '+str(r.status_code)+'. No customer message was sent.')
+                data=r.json()
             text=''.join(p.get('text','') for p in data.get('candidates',[{}])[0].get('content',{}).get('parts',[]) if not p.get('thought'))
-            if not text.strip():raise ValueError('No text')
+            if not text.strip():
+                reason=data.get('candidates',[{}])[0].get('finishReason')
+                if reason=='MAX_TOKENS':raise HTTPException(502,'Gemini reached its output limit before returning a draft. No customer message was sent.')
+                raise HTTPException(502,'Gemini returned no usable draft, possibly due to a safety filter. Review the question manually.')
         except HTTPException:raise
+        except httpx.TimeoutException:raise HTTPException(504,'Gemini timed out. No retry or customer send occurred.') from None
         except (httpx.HTTPError,ValueError,KeyError,IndexError,TypeError):raise HTTPException(502,'Gemini draft unavailable. Review manually; no customer message was sent.') from None
         return {'text':text[:10000],'requires_review':True,'sent':False,'order_created':False,'provider':'Gemini','model':model,'tokens':data.get('usageMetadata',{}),'cost':None,'billing_note':'Provider billing eligibility is external; cost is not inferred.'}
