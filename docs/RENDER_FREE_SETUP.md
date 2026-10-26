@@ -3,7 +3,8 @@
 The root `render.yaml` provisions only a **free Docker web service** named
 `notochat-api-demo`. It does not provision a database, disk, worker, cron job,
 paid service, provider credential or generated secret. Automatic deploys are off.
-Frontend remains the existing Vercel Next.js deployment.
+Frontend runs on the existing free Render Node service `notochat-demo` at
+https://notochat-demo.onrender.com; Vercel is not required for this setup.
 
 Build: `deploy/Dockerfile.render`, repository-root context, Python 3.12,
 `pip install -r backend/requirements.txt`, FFmpeg/FFprobe, Pillow and pypdf.
@@ -32,8 +33,8 @@ limited test. Manual AI calls also incur provider costs; they are not free hosti
 
 After deployment, verify the exact deployed Git commit, HTTPS `/health`, and
 unauthenticated `/conversations` rejection. Health alone is not a full database
-or user-flow check. Then configure Vercel `BACKEND_URL` to the verified Render
-HTTPS origin. For account mode, Vercel also needs durable `AUTH_DATABASE_URL`,
+or user-flow check. Then configure the existing Render frontend `BACKEND_URL` to the verified Render
+HTTPS origin. For account mode, that frontend also needs durable `AUTH_DATABASE_URL`,
 `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, matching `INTERNAL_API_SECRET`, approved
 SMTP configuration and the existing auth migration. These are separate setup
 steps, not automatically performed by this Blueprint. A legacy token session
@@ -53,7 +54,7 @@ replies, scheduled follow-ups, push/email flushing and other background jobs wil
 not execute reliably on this configuration. Do not enable or promise them.
 The worker's existence in the image does not mean it runs.
 
-Vercel **Explore NotoChat** remains a browser-local sample until backend wiring
+The frontend **Explore NotoChat** remains a browser-local sample until backend wiring
 is complete. A deployed backend with verified synthetic API flows is a
 backend-connected demo, not live-verified messaging or production readiness.
 
@@ -82,3 +83,29 @@ remote CI result is unverified. No replacement credentials were created.
 Only the browser-local demo is deployed. No API, DB, worker or provider credentials
 were provisioned. Account login and live AI/messaging remain unconfigured. Existing
 MealOps service was not changed; both free services share workspace free hours.
+
+## Pilot readiness — 26 October 2026
+
+The frontend is live; the backend Blueprint is prepared, not deployed. The current
+free-test startup guard deliberately refuses live sends, live payments, email sends
+and widget activation. Supplying credentials alone will not activate these paths.
+An explicitly approved live-pilot configuration and its checks would be a separate
+step; do not bypass the test guard by silently changing flags.
+
+Minimum sequence:
+1. Approve/select a durable PostgreSQL project and securely configure the database
+   and app/auth secrets listed above; approve migrations only for that known DB.
+2. Connect the existing frontend to the API, configure verified account email, and
+   verify tenant signup/login plus manual catalog sync using synthetic test records.
+3. Select one pilot channel, approve its official provider connection and sender
+   identity, and define permitted live actions. AI needs an approved provider/budget.
+4. Confirm Peoniara shipping/returns policy and inventory authority. The public
+   Store API supplies listings, not stock quantity or address-specific shipping.
+   Scoped WooCommerce access/checkout contracts are needed for native store orders.
+5. Choose reliable worker hosting before enabling unattended replies/follow-ups;
+   the free sleeping web service is suitable for manual testing only.
+
+Trial/service-fee decisions can stay disabled and need not block manual evaluation.
+WhatsApp QR transport remains a code gap only if that transport is selected.
+No supported browser control tools were available for English navigation/visual QA;
+HTTP checks and saved-demo migration tests do not substitute for browser testing.
