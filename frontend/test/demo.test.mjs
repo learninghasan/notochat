@@ -92,3 +92,9 @@ test('Peoniara synthetic brand, reviews and delivery-aware reorder preserve boun
  assert.equal((await api('/customers/1/profile')).orders.length,1);
  assert.equal((await api('/commerce/report')).actual_ai_cost_paisa,0);
 });
+
+test('English demo migrates known saved samples without resetting user data',async()=>{
+ const s=await api('/workspace');s.conversations[0].customer='রাফি আহমেদ';s.messages[1][0].text='ঢাকায় ডেলিভারি কত দিনে হবে?';s.messages[1].push({id:999,role:'team',text:'My saved reply'});s.conversations.push({id:99,customer:'Custom customer',channel:'Website',mode:'human'});
+ store.set('notochat-peoniara-synthetic-v1',JSON.stringify(s));
+ const updated=await api('/workspace');assert.equal(updated.conversations[0].customer,'Rafi Ahmed');assert.equal(updated.messages[1][0].text,'How long does delivery to Dhaka take?');assert.equal(updated.messages[1].at(-1).text,'My saved reply');assert.equal(updated.conversations.at(-1).customer,'Custom customer');
+});
