@@ -19,9 +19,11 @@ def validate(env):
         Fernet(env.get('CREDENTIAL_ENCRYPTION_KEY', '').encode())
     except Exception:
         raise ValueError('Set CREDENTIAL_ENCRYPTION_KEY to an approved Fernet key') from None
-    for name in ('ENABLE_LIVE_SEND', 'ENABLE_EMAIL_SEND', 'WIDGET_ENABLED', 'SSLCOMMERZ_LIVE'):
+    for name in ('ENABLE_LIVE_SEND', 'ENABLE_EMAIL_SEND', 'SSLCOMMERZ_LIVE'):
         if env.get(name, '0') != '0':
             raise ValueError(f'{name} must remain 0 for the free testing deployment')
+    if env.get('WIDGET_ENABLED','0')!='0' and env.get('PILOT_WEBSITE_CHAT')!='1':
+        raise ValueError('Website chat requires explicit PILOT_WEBSITE_CHAT=1')
     if env.get('APP_ENV') != 'production' or env.get('SEED_SAMPLE_DATA') != '0':
         raise ValueError('Require APP_ENV=production and SEED_SAMPLE_DATA=0')
 

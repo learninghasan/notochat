@@ -2,7 +2,11 @@
 
 Scope evidence: user “সবগুলোর … মেসেজ আসবে একটা প্ল্যাটফর্মে”, “এবং সেলস”, “ওটার মতো … প্রোডাক্ট বানাতে”, and “amader j example diyechi setar sob kichu poneby one implement koro”; reference https://www.aipraktor.com/ reviewed as a whole. GitHub publication and a usable Vercel URL are explicit acceptance criteria. This is the consolidated inventory, not a claim of unrestricted parity or production readiness. The bounded final implementation is documented in [FINAL_SCOPE_AND_OPERATIONS.md](FINAL_SCOPE_AND_OPERATIONS.md).
 
-## Current completion status (supersedes historical deployment notes)
+## Latest activation update — 26 October 2026
+
+See [Journey and live pilot](JOURNEY_AND_LIVE_PILOT.md) for the current deployment and test boundaries. Frontend, dedicated Neon PostgreSQL and Render backend are now connected; Gemini reviewed drafts were live-verified. A guided demo and explicitly enabled website-chat pilot are implemented. WhatsApp account setup, SMTP/account auth, unattended workers and device/browser QA remain pending. Earlier infrastructure-blocker statements below are historical, not the current activation state.
+
+## Historical completion status
 
 The Mobbin-inspired frontend demo is live at https://notochat-demo.onrender.com.
 It is browser-local, not a running production backend. The current code adds an

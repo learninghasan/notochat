@@ -16,3 +16,5 @@ body{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI'
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 /* GoDaddy reference: confident headings, neutral chrome and a crisp primary action. */
 .overview-intro h2{font-weight:700;letter-spacing:-1px}.panelhead h2{font-weight:700}.overview-intro>button{background:#172b27}.nav{background:#f8faf9}.navitem.selected{background:#e9f4f1;border-radius:4px}.panel{box-shadow:none}.brand>span:not(.brand-mark){max-width:145px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.welcome-symbol,.brand .brand-mark{background:var(--accent)}.welcome-shell .login{box-shadow:none}.document summary{cursor:pointer;font-weight:600}.document form{margin-top:20px}.accountform textarea{min-height:80px}
+
+.journey-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px}.journey-lab>.panel{margin-bottom:20px}.journey-lab h3{font-size:19px}.journey-lab p,.journey-lab li{line-height:1.65}.journey-shortcut{margin-bottom:18px}

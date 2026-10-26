@@ -30,3 +30,9 @@ def test_reject_unsafe_startup_without_disclosing_secrets(config, key, value):
         startup.validate({**config, key: value})
     for secret in (config['APP_TOKEN'], config['INTERNAL_API_SECRET'], config['CREDENTIAL_ENCRYPTION_KEY']):
         assert secret not in str(error.value)
+
+
+def test_explicit_website_pilot_keeps_external_sends_blocked(config):
+    enabled={**config,'WIDGET_ENABLED':'1','PILOT_WEBSITE_CHAT':'1'}
+    startup.validate(enabled)
+    with pytest.raises(ValueError):startup.validate({**enabled,'ENABLE_LIVE_SEND':'1'})
