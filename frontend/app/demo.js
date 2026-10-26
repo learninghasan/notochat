@@ -47,9 +47,10 @@ export async function demoApi(path,options={}){
    if(kind==='messages')check(c.mode==='human','Take over before replying');
    const text=typeof body.text==='string'?body.text.trim():'';check(text&&text.length<=8000,'Reply must contain 1–8,000 characters');
    (s.messages[id]??=[]).push({id:Date.now(),role:kind==='incoming'?'customer':'team',text,created_at:iso()});
-   if(kind==='incoming')s.conversation_meta[id]={...s.conversation_meta[id],last_inbound:iso()};save(s);return {saved:true,delivery:'browser-only demo'};
+   if(kind==='incoming'){s.conversation_meta[id]={...s.conversation_meta[id],last_inbound:iso()};if(c.mode==='ai')s.messages[id].push({id:crypto.randomUUID(),role:'assistant',text:sampleReply(s,text),created_at:iso()});}save(s);return {saved:true,delivery:'browser-only demo'};
   }
-  if(['draft','assistant','media'].includes(kind))throw Error('AI is not connected in this demo. Connect your backend AI provider to enable this feature.');
+  if(kind==='assistant'&&method==='POST')return {text:sampleReply(s,(s.messages[id]||[]).filter(m=>m.role==='customer').at(-1)?.text||''),simulated:true};
+  if(['draft','media'].includes(kind))throw Error('AI is not connected in this demo. Connect your backend AI provider to enable this feature.');
  }
  if(path==='/orders'&&method==='POST'){
   check(s.conversations.some(c=>c.id===body.conversation_id),'Select a conversation');check(body.request_id&&body.customer?.trim()&&body.phone?.trim().length>=5&&body.address?.trim().length>=5,'Customer, phone and full address are required');
@@ -83,3 +84,5 @@ export async function demoApi(path,options={}){
  if(path==='/team'&&method==='POST'){check(body.name?.trim()&&body.email?.includes('@'),'Name and valid email are required');check(!s.team.some(t=>t.email.toLowerCase()===body.email.toLowerCase()),'Email already listed');const d={...body,id:uid('team'),access:'Profile only; no invitation sent or access control applied'};s.team.push(d);save(s);return d;}
  throw Error('This action is not available');
 }
+
+function sampleReply(s,text){const p=s.products.find(p=>p.stock>0);if(/refund|complaint|rash|allerg|irritat/i.test(text))return '[SIMULATED AI — no model call] Please let our team review this concern. I cannot diagnose skin conditions or approve a refund.';if(/deliver|shipping/i.test(text))return '[SIMULATED AI — no model call] Please share a test delivery area. The team must confirm the current delivery fee and timing.';return '[SIMULATED AI — no model call] '+(p?'Our fictional demo catalog includes '+p.name+' at BDT '+p.price+'. Would you like more details or a reviewed order draft?':'Please tell our team which product you need. No available demo product is configured.');}

@@ -57,7 +57,7 @@ test('Bengali knowledge is searchable and no demo AI is fabricated',async()=>{
  await post('/knowledge',{title:'রিটার্ন নীতি',text:'এক্সচেঞ্জ করতে যোগাযোগ করুন'});
  const result=await api('/knowledge/search?q='+encodeURIComponent('এক্সচেঞ্জ'));
  assert.equal(result.length,1);assert.equal(result[0].match_type,'keyword');
- await assert.rejects(()=>post('/conversations/1/assistant',{action:'summary'}),/not connected/);
+ const draft=await post('/conversations/1/assistant',{action:'draft'});assert.equal(draft.simulated,true);assert.match(draft.text,/SIMULATED AI/);
 });
 test('team directory is explicit about profiles rather than access enforcement',async()=>{
  const t=await post('/team',{name:'Agent',email:'agent@example.com',role:'Agent',channels:['Messenger']});
@@ -97,4 +97,13 @@ test('English demo migrates known saved samples without resetting user data',asy
  const s=await api('/workspace');s.conversations[0].customer='রাফি আহমেদ';s.messages[1][0].text='ঢাকায় ডেলিভারি কত দিনে হবে?';s.messages[1].push({id:999,role:'team',text:'My saved reply'});s.conversations.push({id:99,customer:'Custom customer',channel:'Website',mode:'human'});
  store.set('notochat-peoniara-synthetic-v1',JSON.stringify(s));
  const updated=await api('/workspace');assert.equal(updated.conversations[0].customer,'Rafi Ahmed');assert.equal(updated.messages[1][0].text,'How long does delivery to Dhaka take?');assert.equal(updated.messages[1].at(-1).text,'My saved reply');assert.equal(updated.conversations.at(-1).customer,'Custom customer');
+});
+
+test('incoming demo messages receive labelled simulated replies only in AI mode',async()=>{
+ await post('/conversations/1/incoming',{text:'skin care product'});
+ let messages=await api('/conversations/1/messages');
+ assert.equal(messages.at(-1).role,'assistant');assert.match(messages.at(-1).text,/SIMULATED AI/);
+ await patch('/conversations/1/mode',{mode:'human'});
+ await post('/conversations/1/incoming',{text:'hello again'});
+ messages=await api('/conversations/1/messages');assert.equal(messages.at(-1).role,'customer');
 });
