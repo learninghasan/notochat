@@ -68,3 +68,22 @@ def test_empty_output_is_actionable_without_exposing_provider_content(gateway,mo
  mock_client(monkeypatch,{'candidates':[{'finishReason':'MAX_TOKENS','content':{'parts':[{'thought':True,'text':'private thought'}]}}]})
  r=call(c,'org_A','POST','/ai/pilot/draft',{'question':'hello','public_or_redacted':True})
  assert r.status_code==502 and 'output limit' in r.text and 'private thought' not in r.text
+
+
+def test_model_discovery_only_returns_supported_identifiers(gateway,monkeypatch):
+ c,g=gateway
+ monkeypatch.setenv('GEMINI_API_KEY','secret-fixture')
+ seen=[]
+ class Response:
+  status_code=200
+  def json(self):return {'models':[{'name':'models/gemini-test','supportedGenerationMethods':['generateContent'],'private':'secret-fixture'},{'name':'models/embed','supportedGenerationMethods':['embedContent']},{'name':'unsafe name','supportedGenerationMethods':['generateContent']}]}
+ class Client:
+  def __init__(self,**kw):pass
+  async def __aenter__(self):return self
+  async def __aexit__(self,*a):pass
+  async def get(self,url,**kw):seen.append(url);return Response()
+ monkeypatch.setattr('httpx.AsyncClient',Client)
+ r=call(c,'org_A','GET','/ai/pilot/models')
+ assert r.status_code==200 and r.json()['models']==['gemini-test']
+ assert r.json()['free_tier_verified'] is False and 'secret-fixture' not in r.text
+ assert seen==['https://generativelanguage.googleapis.com/v1beta/models']

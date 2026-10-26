@@ -14,6 +14,20 @@ def install_gemini_pilot(app,Record,authorize,session,put):
     @app.get('/ai/pilot',dependencies=[Depends(authorize)])
     def status():
         return {'provider':'Gemini','configured':bool(os.getenv('GEMINI_API_KEY') and os.getenv('GEMINI_MODEL')),'enabled':os.getenv('GEMINI_PILOT_ENABLED')=='1','model':os.getenv('GEMINI_MODEL',''),'free_tier_verified':False,'mode':'reviewed drafts only','note':'Select a free-tier eligible project/model in AI Studio. NotoChat cannot verify billing eligibility. No paid fallback.'}
+    @app.get('/ai/pilot/models',dependencies=[Depends(authorize)])
+    async def models():
+        key=os.getenv('GEMINI_API_KEY')
+        if not key:raise HTTPException(503,'Configure the backend Gemini key first')
+        # Fixed Google endpoint; only public model identifiers leave the backend.
+        try:
+            async with httpx.AsyncClient(timeout=15,follow_redirects=False) as c:
+                r=await c.get('https://generativelanguage.googleapis.com/v1beta/models',headers={'x-goog-api-key':key},params={'pageSize':1000})
+                if r.status_code!=200:raise HTTPException(502,'Gemini model discovery returned HTTP '+str(r.status_code))
+                data=r.json()
+            names=[m['name'].removeprefix('models/') for m in data.get('models',[]) if 'generateContent' in m.get('supportedGenerationMethods',[]) and re.fullmatch(r'models/[A-Za-z0-9._-]{1,100}',m.get('name',''))]
+            return {'models':names,'free_tier_verified':False,'note':'Availability does not establish free quota. Check this project in AI Studio.'}
+        except HTTPException:raise
+        except (httpx.HTTPError,ValueError,KeyError,TypeError):raise HTTPException(502,'Gemini model discovery unavailable') from None
     @app.post('/ai/pilot/draft',dependencies=[Depends(authorize)])
     async def draft(body:Draft,s=Depends(session)):
         key=os.getenv('GEMINI_API_KEY');model=os.getenv('GEMINI_MODEL','')
