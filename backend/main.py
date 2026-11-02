@@ -26,7 +26,7 @@ class Product(Base):
     price: Mapped[int] = mapped_column(Integer)
     stock: Mapped[int] = mapped_column(Integer)
 
-engine = create_engine(os.getenv("DATABASE_URL", "sqlite:///./inbox.db"))
+engine = create_engine(os.getenv("DATABASE_URL", "sqlite:///./inbox.db"), pool_pre_ping=True, pool_recycle=300)
 def create_workspace(engine, trusted_identity=False, seed_sample=True):
     Base.metadata.create_all(engine)
     with Session(engine) as s:

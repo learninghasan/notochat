@@ -37,6 +37,7 @@ async function proxy(request,{params}){
  try{
   const target=new URL(backend.replace(/\/$/,'')+path);target.search=new URL(request.url).search;
   const r=await fetch(target,{method:request.method,headers,body,redirect:'error',cache:'no-store',signal:AbortSignal.timeout(65000)});
+  if(!r.headers.get('content-type')?.includes('application/json'))return Response.json({detail:'The business server is temporarily unavailable or waking up. Please retry shortly.'},{status:503,headers:{'Cache-Control':'no-store'}});
   return new Response(r.body,{status:r.status,headers:{'Content-Type':r.headers.get('content-type')||'application/json','Cache-Control':'no-store'}});
  }catch{return Response.json({detail:'Backend unavailable. Check server status and BACKEND_URL.'},{status:502})}
 }

@@ -17,6 +17,7 @@ import BrandingSettings from './branding-settings';
 import OperationsReview from './operations-review';
 import WebsiteCatalog from './website-catalog';
 import AIPilot from './ai-pilot';
+import {readApiResponse} from '../lib/api-response.mjs';
 import JourneyLab from './journey-lab';
 import {CheckoutDelivery} from './delivery-rules';
 
@@ -56,7 +57,7 @@ export default function Home(){
  const identityRef=useRef(null);
  const busyRef=useRef(busy);busyRef.current=busy;
  const active=chats.find(c=>c.id===activeId);
- async function api(path,options={},useDemo=demo){if(useDemo)return demoApi(path,options);const r=await fetch('/api'+path,{...options,headers:{...(identityRef.current?{'X-NotoChat-Expected-Organization':identityRef.current.organizationId}:token?{Authorization:'Bearer '+token}:{}),'Content-Type':'application/json'}});let d;try{d=await r.json()}catch{throw Error('Backend did not return JSON. Check BACKEND_URL.')}if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||'Request failed'));return d;}
+ async function api(path,options={},useDemo=demo){if(useDemo)return demoApi(path,options);const r=await fetch('/api'+path,{...options,headers:{...(identityRef.current?{'X-NotoChat-Expected-Organization':identityRef.current.organizationId}:token?{Authorization:'Bearer '+token.trim()}:{}),'Content-Type':'application/json'}});return readApiResponse(r);}
  useEffect(()=>{
   if(!modal)return;
   const previous=document.activeElement;const dialog=dialogRef.current;
@@ -68,7 +69,7 @@ export default function Home(){
  },[modal?.kind]);
  const post=(path,body={})=>api(path,{method:'POST',body:JSON.stringify(body)});
  async function refresh(useDemo=demo){const [c,p,w,a,i,b,brand]=await Promise.all(['/conversations','/catalog','/workspace','/analytics','/integrations','/billing','/branding'].map(path=>api(path,{},useDemo)));setChats(c);setProducts(p);setWorkspace(w);setAnalytics(a);setConnections(i);setBilling(b);setBranding(brand);return {c,w};}
- async function open(useDemo){setBusy(true);setError('');try{const {c,w}=await refresh(useDemo);setDemo(useDemo);setActiveId(c[0]?.id||null);setAgentForm(w.agent);setLogged(true);}catch(e){setError(e.message)}finally{setBusy(false)}}
+ async function open(useDemo){setBusy(true);setError('');try{if(!useDemo){for(let attempt=0;attempt<3;attempt++){try{setNotice(attempt?'Server is waking up. Retrying connection…':'Connecting to your workspace…');await api('/conversations',{},false);break}catch(e){if(!e.retryable||attempt===2)throw e;await new Promise(r=>setTimeout(r,3000));}}}const {c,w}=await refresh(useDemo);setNotice('');setDemo(useDemo);setActiveId(c[0]?.id||null);setAgentForm(w.agent);setLogged(true);}catch(e){setError(e.message)}finally{setBusy(false)}}
  async function action(fn,success){setBusy(true);setError('');setNotice('');try{const result=await fn();await refresh();if(success)setNotice(success);return result}catch(e){setError(e.message);return null}finally{setBusy(false)}}
  useEffect(()=>{if(!logged||!activeId)return;let ignore=false;setMessagesLoading(true);setMessages([]);api('/conversations/'+activeId+'/messages').then(m=>{if(!ignore)setMessages(m)}).catch(e=>{if(!ignore)setError(e.message)}).finally(()=>{if(!ignore)setMessagesLoading(false)});return()=>{ignore=true}},[activeId,logged,demo]);
  useEffect(()=>{
