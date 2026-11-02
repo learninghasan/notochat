@@ -9,7 +9,7 @@ async function proxy(request,{params}){
  const {path:parts}=await params;
  if(parts.some(p=>p==='.'||p==='..'||p.includes('/')||p.includes('\\')))return Response.json({detail:'Invalid API path'},{status:400});
  const path='/'+parts.map(encodeURIComponent).join('/');
- const headers={'Content-Type':request.headers.get('content-type')||'application/json'};
+ const headers={'Accept':'application/json','Content-Type':request.headers.get('content-type')||'application/json'};
  const body=['GET','HEAD'].includes(request.method)?undefined:await request.arrayBuffer();
  if(body&&body.byteLength>12500000)return Response.json({detail:'Request too large'},{status:413});
  const authorization=request.headers.get('authorization')||'';
